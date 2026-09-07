@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Factory Dashboard Pro</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Shared Firebase endpoint config -->
+    <script src="firebase-config.js"></script>
+
+    <!-- Tailwind Config for Custom Colors -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                50: '#f0fdfa',
+                100: '#ccfbf1',
+                500: '#14b8a6',
+                600: '#0d9488',
+                900: '#134e4a',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9; 
+        }
+        
+        .number-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+        }
+
+        .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: .5; transform: scale(1.2); }
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="text-slate-800 h-[100dvh] flex flex-col overflow-hidden bg-slate-50 relative">
+    <div class="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
+        <div class="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-blue-400/10 blur-[100px]"></div>
+        <div class="absolute top-[20%] -right-[10%] w-[40%] h-[60%] rounded-full bg-emerald-400/10 blur-[120px]"></div>
+        <div class="absolute -bottom-[20%] left-[20%] w-[60%] h-[50%] rounded-full bg-indigo-400/10 blur-[120px]"></div>
+    </div>
+
+    <!-- Top Navigation -->
+    <nav class="bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-4 md:px-6 py-3 md:py-4 flex flex-col md:flex-row items-center justify-between shrink-0 z-10 gap-3 md:gap-0">
+        <div class="flex items-center justify-between w-full md:w-auto">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 md:w-10 md:h-10 bg-slate-900 rounded-lg md:rounded-xl flex items-center justify-center text-white shadow-md">
+                    <i class="ph-fill ph-factory text-lg md:text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg md:text-xl font-bold text-slate-900 tracking-tight leading-none">LineView Pro</h1>
+                    <p class="text-[10px] md:text-xs text-slate-500 font-medium mt-1">Production Monitoring System</p>
+                </div>
+            </div>
+            <div class="flex md:hidden items-center gap-1 px-2.5 py-1.5 bg-emerald-50 rounded-full border border-emerald-100 shadow-sm shrink-0">
+                <i class="ph-fill ph-broadcast text-emerald-500 animate-pulse text-sm"></i>
+                <span class="text-[10px] font-bold text-emerald-700">LIVE</span>
+            </div>
+        </div>
+        
+        <!-- FIX: Added flex-wrap to allow items to stack cleanly on mobile -->
+        <div class="flex flex-wrap w-full md:w-auto items-center justify-start md:justify-end gap-2 md:gap-4">
+            
+            <!-- FIX: Added whitespace-nowrap to prevent text squishing -->
+            <a href="history.html" id="btn-history" class="px-3 md:px-5 py-2 md:py-2.5 rounded-xl font-semibold bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-md shadow-brand-600/20 flex items-center gap-1.5 md:gap-2 whitespace-nowrap">
+                <i class="ph-fill ph-chart-line-up text-base md:text-lg"></i>
+                <span class="text-sm md:text-base">Production History</span>
+            </a>
+            
+            <button id="btn-login" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2 md:mr-4 whitespace-nowrap">
+                <i class="ph-bold ph-lock-key text-base md:text-lg"></i>
+                <span class="text-sm md:text-base">Login</span>
+            </button>
+            
+            <!-- FIX: Added flex-wrap for the admin controls container -->
+            <div id="admin-shift-controls" class="hidden items-center flex-wrap gap-2 md:mr-4">
+                
+                <button id="toggle-shift-btn" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium text-white transition-colors shadow-sm bg-emerald-500 hover:bg-emerald-600 flex items-center gap-1.5 md:gap-2 whitespace-nowrap">
+                    <i id="toggle-shift-icon" class="ph-fill ph-play-circle text-base md:text-lg"></i>
+                    <span id="toggle-shift-text" class="text-sm md:text-base">Start Shift</span>
+                </button>
+                
+                <div id="auto-mode-indicator" class="hidden px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 items-center gap-1.5 md:gap-2 whitespace-nowrap" title="Shift is controlled by schedule">
+                    <i class="ph-fill ph-clock-user text-base md:text-lg"></i>
+                    <span class="text-sm md:text-base">Auto Mode</span>
+                </div>
+                
+                <!-- FIX: Added shrink-0 to prevent icons from collapsing -->
+                <button id="shift-settings-btn" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2 shrink-0" title="Automation Settings">
+                    <i class="ph-fill ph-gear text-base md:text-lg"></i>
+                </button>
+
+                <button id="reset-shift-btn" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2 shrink-0" title="Reset Shift">
+                    <i class="ph-fill ph-trash text-base md:text-lg"></i>
+                    <span class="text-sm md:text-base hidden md:inline">Reset</span>
+                </button>
+                
+                <button id="btn-logout" class="px-2 md:px-3 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2 shrink-0" title="Logout">
+                    <i class="ph-bold ph-sign-out text-base md:text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Time Data displays -->
+            <div class="flex items-center gap-2 md:gap-4 md:mr-4 pr-2 md:pr-4 border-r border-slate-200 flex-wrap">
+                <div class="flex flex-col items-end whitespace-nowrap">
+                    <span class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Shift Start</span>
+                    <span id="shift-start-display" class="text-xs font-semibold text-slate-700">--:--</span>
+                </div>
+                <div class="flex flex-col items-end whitespace-nowrap">
+                    <span class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Shift End</span>
+                    <span id="shift-end-display" class="text-xs font-semibold text-slate-700">--:--</span>
+                </div>
+            </div>
+            
+            <div class="flex flex-col items-end md:mr-4 whitespace-nowrap">
+                <span class="text-[10px] md:text-xs text-slate-500 font-medium uppercase tracking-wider">Last Updated</span>
+                <span id="last-updated" class="text-xs md:text-sm font-semibold text-slate-700">--:--:--</span>
+            </div>
+            
+            <i id="wifi-status-icon" class="ph-fill ph-wifi-slash text-slate-400 text-xl md:text-2xl shrink-0"></i>
+
+            <div class="hidden md:flex items-center gap-1 md:gap-2 px-2.5 md:px-4 py-1.5 md:py-2 bg-emerald-50 rounded-full border border-emerald-100 shadow-sm shrink-0">
+                <i class="ph-fill ph-broadcast text-emerald-500 animate-pulse text-sm md:text-base"></i>
+                <span class="text-xs md:text-sm font-bold text-emerald-700">LIVE</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Active Breakdown Banner -->
+    <div id="active-breakdown-banner" class="hidden animate-pulse bg-rose-600 text-white px-4 py-2 text-center text-xs md:text-sm font-bold shadow-md shrink-0 items-center justify-center gap-2 relative overflow-hidden transition-all duration-300">
+        <i class="ph-fill ph-warning-octagon text-base md:text-xl"></i>
+        <span>ACTIVE BREAKDOWN: Line Stopped Since <span id="active-breakdown-time">--:--:--</span></span>
+    </div>
+
+    <main class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+        <div class="max-w-7xl mx-auto space-y-6">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+                <!-- Status Card -->
+                <div id="status-card" class="glass-panel rounded-2xl p-6 relative overflow-hidden transition-all duration-500">
+                    <div class="flex justify-between items-start mb-4">
+                        <div id="status-icon-bg" class="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-100 text-slate-500 shadow-sm transition-colors">
+                            <i id="status-icon" class="ph ph-question text-2xl"></i>
+                        </div>
+                        <div id="status-pulse" class="hidden w-3 h-3 rounded-full bg-emerald-500 pulse-dot shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
+                    </div>
+                    <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Line Status</h3>
+                    <div id="line-status" class="text-3xl font-bold text-slate-400">Unknown</div>
+                    <i class="ph-fill ph-activity absolute -bottom-4 -right-4 text-7xl text-slate-900 opacity-5 rotate-12"></i>
+                </div>
+
+                <!-- Total Cases Card -->
+                <div class="glass-panel rounded-2xl p-6 relative overflow-hidden">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-[0_4px_12px_rgba(59,130,246,0.3)] border border-blue-400/30">
+                            <i class="ph ph-package text-2xl"></i>
+                        </div>
+                        <div id="admin-adjust-controls" class="hidden items-center gap-1.5 z-10 relative">
+                            <button id="btn-adjust-minus" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center shadow-sm transition-colors" title="Subtract 1">
+                                <i class="ph-bold ph-minus text-sm"></i>
+                            </button>
+                            <button id="btn-adjust-plus" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center shadow-sm transition-colors" title="Add 1">
+                                <i class="ph-bold ph-plus text-sm"></i>
+                            </button>
+                            <button id="btn-adjust-manual" class="w-8 h-8 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center shadow-sm transition-colors ml-1" title="Manual Adjustment">
+                                <i class="ph-bold ph-pencil-simple text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Total Cases</h3>
+                    <div class="flex items-baseline gap-2">
+                        <div id="total-cases" class="text-4xl font-bold text-slate-900 tracking-tight">0</div>
+                        <span class="text-sm font-medium text-slate-500">units</span>
+                    </div>
+                    <i class="ph-fill ph-boxes absolute -bottom-4 -right-4 text-7xl text-slate-900 opacity-5 -rotate-12"></i>
+                </div>
+
+                <!-- Breakdowns Card -->
+                <div class="glass-panel rounded-2xl p-6 relative overflow-hidden">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-[0_4px_12px_rgba(245,158,11,0.3)] border border-amber-400/30">
+                            <i class="ph ph-warning-circle text-2xl"></i>
+                        </div>
+                    </div>
+                    <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Breakdown Events</h3>
+                    <div class="flex items-baseline gap-2">
+                        <div id="total-breakdowns" class="text-4xl font-bold text-slate-900 tracking-tight">0</div>
+                        <span class="text-sm font-medium text-slate-500">stops</span>
+                    </div>
+                    <i class="ph-fill ph-warning absolute -bottom-4 -right-4 text-7xl text-slate-900 opacity-5 rotate-12"></i>
+                </div>
+
+                <!-- Total Downtime Card -->
+                <div class="glass-panel rounded-2xl p-6 relative overflow-hidden">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br from-rose-500 to-pink-600 text-white shadow-[0_4px_12px_rgba(244,63,94,0.3)] border border-rose-400/30">
+                            <i class="ph ph-timer text-2xl"></i>
+                        </div>
+                    </div>
+                    <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Total Downtime</h3>
+                    <div class="flex items-baseline gap-2">
+                        <div id="total-downtime" class="text-4xl font-bold text-slate-900 tracking-tight">0s</div>
+                    </div>
+                    <i class="ph-fill ph-hourglass-high absolute -bottom-4 -right-4 text-7xl text-slate-900 opacity-5 -rotate-12"></i>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+                <!-- Hourly Table -->
+                <div class="flex flex-col gap-4 md:gap-6 h-[400px] lg:h-[500px]">
+                    <div class="glass-panel rounded-2xl flex flex-col overflow-hidden flex-1">
+                        <div class="p-4 border-b border-slate-100 bg-white/50 flex items-center justify-between shrink-0">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white flex items-center justify-center shadow-md">
+                                    <i class="ph-fill ph-list-numbers text-lg"></i>
+                                </div>
+                                <h2 class="text-lg font-bold text-slate-800">Hourly Production</h2>
+                            </div>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-4">
+                            <div class="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
+                                <table class="w-full text-left border-collapse bg-white">
+                                    <thead class="bg-slate-50/80 backdrop-blur-sm sticky top-0">
+                                        <tr class="border-b border-slate-200">
+                                            <th class="py-2 px-3 text-xs uppercase tracking-wider font-semibold text-slate-500">Hour</th>
+                                            <th class="py-2 px-3 text-xs uppercase tracking-wider font-semibold text-slate-500 text-right">Cases Produced</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hourly-list">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Breakdowns -->
+                <div class="glass-panel rounded-2xl flex flex-col overflow-hidden h-[400px] lg:h-[500px]">
+                    <div class="p-6 border-b border-slate-100 bg-white/50 flex items-center justify-between shrink-0">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 text-white flex items-center justify-center shadow-md"><i class="ph-fill ph-list-dashes text-sm"></i></div>
+                            <h2 class="text-lg font-bold text-slate-800">Recent Breakdowns</h2>
+                        </div>
+                        <span class="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-1 rounded-md" id="history-count">0 records</span>
+                    </div>
+                    
+                    <div class="flex-1 overflow-y-auto p-2">
+                        <div id="breakdown-list" class="space-y-1"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Shift Automation Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white/95 backdrop-blur-xl border border-slate-200/50 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h2 class="font-bold text-slate-800">Shift Automation</h2>
+                <button id="close-settings-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <!-- Mode Toggle -->
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <p class="text-sm font-bold text-slate-800">Auto-Schedule Mode</p>
+                        <p class="text-xs text-slate-500 mt-0.5">Start and stop automatically</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="auto-mode-toggle" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                </div>
+
+                <!-- Time Inputs -->
+                <div id="auto-time-inputs" class="hidden space-y-4 mb-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">Auto-Start Time</label>
+                        <input type="time" id="auto-start-input" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all text-slate-800">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">Auto-End Time</label>
+                        <input type="time" id="auto-end-input" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all text-slate-800">
+                    </div>
+                    <p class="text-[10px] text-slate-500 leading-tight mt-2"><i class="ph-fill ph-info"></i> The system will automatically reset and archive the data when the shift ends.</p>
+                </div>
+
+                <button id="save-settings-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2">
+                    <i class="ph-fill ph-floppy-disk"></i> Save Configuration
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white/95 backdrop-blur-xl border border-slate-200/50 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h2 class="font-bold text-slate-800">Admin Login</h2>
+                <button id="close-login-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <label class="block text-sm font-medium text-slate-700 mb-2">Password</label>
+                <input type="password" id="admin-password" class="w-full border border-slate-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all" placeholder="Enter password">
+                <p id="login-error" class="text-xs text-rose-500 mt-2 hidden">Incorrect password.</p>
+                <button id="submit-login-btn" class="w-full mt-6 bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-lg transition-colors">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manual Adjustment Modal -->
+    <div id="adjust-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white/95 backdrop-blur-xl border border-slate-200/50 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h2 class="font-bold text-slate-800">Manual Case Adjustment</h2>
+                <button id="close-adjust-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <label class="block text-sm font-medium text-slate-700 mb-2">Adjustment Amount</label>
+                <input type="number" id="manual-adjust-amount" class="w-full border border-slate-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="e.g. 50 or -20">
+                <p class="text-xs text-slate-500 mt-2">Enter a positive number to add cases, or a negative number to subtract.</p>
+                <button id="submit-adjust-btn" class="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors">Apply Adjustment</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN SCRIPT -->
+    <script>
+        // DOM Elements
+        const totalCasesEl = document.getElementById('total-cases');
+        const lineStatusEl = document.getElementById('line-status');
+        const statusCardEl = document.getElementById('status-card');
+        const statusIconBgEl = document.getElementById('status-icon-bg');
+        const statusIconEl = document.getElementById('status-icon');
+        const statusPulseEl = document.getElementById('status-pulse');
+        
+        const totalDowntimeEl = document.getElementById('total-downtime');
+        const lastUpdatedEl = document.getElementById('last-updated');
+        
+        const totalBreakdownsEl = document.getElementById('total-breakdowns');
+        const historyCountEl = document.getElementById('history-count');
+        const breakdownListEl = document.getElementById('breakdown-list');
+
+        const activeBreakdownBanner = document.getElementById('active-breakdown-banner');
+        const activeBreakdownTime = document.getElementById('active-breakdown-time');
+
+        const hourlyListEl = document.getElementById('hourly-list');
+
+        const toggleShiftBtn = document.getElementById('toggle-shift-btn');
+        const toggleShiftIcon = document.getElementById('toggle-shift-icon');
+        const toggleShiftText = document.getElementById('toggle-shift-text');
+        const autoModeIndicator = document.getElementById('auto-mode-indicator');
+        const resetShiftBtn = document.getElementById('reset-shift-btn');
+
+        let shiftActive = false;
+        let currentBreakdownStart = null; 
+        let recentBreakdowns = [];
+        
+        // Automation states
+        let currentShiftMode = 'manual';
+        let currentAutoStart = '06:00';
+        let currentAutoEnd = '14:30';
+
+        let lastHeartbeatValue = null;
+        let lastHeartbeatTimestamp = Date.now();
+
+        // UI toggler for Auto vs Manual buttons
+        const updateShiftModeUI = (mode) => {
+            if (mode === 'auto') {
+                toggleShiftBtn.classList.add('hidden');
+                autoModeIndicator.classList.remove('hidden');
+                autoModeIndicator.classList.add('flex');
+            } else {
+                toggleShiftBtn.classList.remove('hidden');
+                autoModeIndicator.classList.add('hidden');
+                autoModeIndicator.classList.remove('flex');
+            }
+        };
+
+        // Shift Control Logic (Manual overrides)
+        toggleShiftBtn.addEventListener('click', async () => {
+            const newStatus = !shiftActive;
+            try {
+                const res = await fetch(SHIFT_CONTROL_URL, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: newStatus })
+                });
+                
+                if (res.ok) {
+                    if (newStatus) {
+                        await fetch(HOURLY_URL, { method: 'DELETE' });
+                        await fetch(BREAKDOWN_LOG_URL, { method: 'DELETE' });
+                        await fetch(ADJUSTMENTS_URL, { method: 'DELETE' });
+                        await fetch(TIMESTAMPS_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start: Date.now(), end: null }) });
+                        hourlyListEl.innerHTML = `<tr><td colspan="2" class="py-8 text-center text-slate-500 font-medium">No hourly data available</td></tr>`;
+                    } else {
+                        await fetch(TIMESTAMPS_URL, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ end: Date.now() }) });
+                    }
+                }
+            } catch (err) {
+                console.error('Error toggling shift:', err);
+                alert('Failed to update shift status.');
+            }
+        });
+
+        resetShiftBtn.addEventListener('click', async () => {
+            if (window.confirm('Are you sure you want to end and archive this shift? This cannot be undone.')) {
+                try {
+                    const snapshot = await buildShiftSnapshot();
+                    const saveRes = await fetch(SHIFT_HISTORY_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(snapshot)
+                    });
+
+                    if (!saveRes.ok) {
+                        alert('Could not save this shift to history. Reset was NOT performed.');
+                        return;
+                    }
+
+                    let resetCommandOk = false;
+                    try {
+                        const resetCmdRes = await fetch(RESET_COMMAND_URL, { method: 'PUT', body: 'true' });
+                        resetCommandOk = resetCmdRes.ok;
+                    } catch (e) {
+                        resetCommandOk = false;
+                    }
+
+                    if (!resetCommandOk) {
+                        alert('Shift was saved, but device reset command failed.');
+                        return;
+                    }
+
+                    const cleanupResults = await Promise.allSettled([
+                        fetch(FIREBASE_URL, { method: 'DELETE' }),
+                        fetch(HOURLY_URL, { method: 'DELETE' }),
+                        fetch(ADJUSTMENTS_URL, { method: 'DELETE' }),
+                        fetch(TIMESTAMPS_URL, { method: 'DELETE' })
+                    ]);
+
+                    totalCasesEl.textContent = '0';
+                    totalDowntimeEl.textContent = '0s';
+                    recentBreakdowns = [];
+                    currentBreakdownStart = null;
+                    document.getElementById('shift-start-display').textContent = '--:--';
+                    document.getElementById('shift-end-display').textContent = '--:--';
+                    renderBreakdownList();
+                    hourlyListEl.innerHTML = `<tr><td colspan="2" class="py-8 text-center text-slate-500 font-medium">No hourly data available</td></tr>`;
+                    updateStatusUI('Shift Inactive');
+
+                } catch (err) {
+                    console.error('Error resetting shift:', err);
+                    alert('Error resetting shift. Check Production History.');
+                }
+            }
+        });
+
+        const adjustCases = async (amount) => {
+            try {
+                const res = await fetch(ADJUSTMENTS_URL, { cache: 'no-store' });
+                let data = await res.json();
+                if (!data) data = { total: 0, hourly: {} };
+                
+                data.total = (data.total || 0) + amount;
+                
+                const now = new Date(); 
+                const h = now.getHours(); 
+                const nextH = h + 1 === 24 ? 0 : h + 1; 
+                const timeLabel = `${String(h).padStart(2, '0')}:00-${String(nextH).padStart(2, '0')}:00`;
+                
+                if (!data.hourly) data.hourly = {};
+                data.hourly[timeLabel] = (data.hourly[timeLabel] || 0) + amount;
+                
+                await fetch(ADJUSTMENTS_URL, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                fetchData();
+            } catch (err) {
+                console.error("Adjustment error", err);
+            }
+        };
+
+        document.getElementById('btn-adjust-minus').addEventListener('click', () => adjustCases(-1));
+        document.getElementById('btn-adjust-plus').addEventListener('click', () => adjustCases(1));
+
+        function initApp() {
+            fetchData();
+            setInterval(fetchData, 1000);
+
+            setInterval(() => {
+                const timeSinceLastHeartbeat = Date.now() - lastHeartbeatTimestamp;
+                const wifiIcon = document.getElementById('wifi-status-icon');
+                if (wifiIcon) {
+                    if (timeSinceLastHeartbeat < 12000) {
+                        wifiIcon.className = "ph-fill ph-wifi-high text-emerald-500 text-xl md:text-2xl shrink-0";
+                    } else {
+                        wifiIcon.className = "ph-fill ph-wifi-slash text-rose-500 text-xl md:text-2xl shrink-0";
+                    }
+                }
+            }, 2000);
+        }
+
+        const formatDowntime = (seconds) => {
+            if (!seconds) return '0s';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            if (h > 0) return `${h}h ${m}m ${s}s`;
+            if (m > 0) return `${m}m ${s}s`;
+            return `${s}s`;
+        };
+
+        async function buildShiftSnapshot() {
+            const [shiftRes, hourlyRes, breakdownRes, adjustmentsRes, timestampsRes] = await Promise.all([
+                fetch(FIREBASE_URL, { cache: 'no-store' }),
+                fetch(HOURLY_URL, { cache: 'no-store' }),
+                fetch(BREAKDOWN_LOG_URL, { cache: 'no-store' }),
+                fetch(ADJUSTMENTS_URL, { cache: 'no-store' }),
+                fetch(TIMESTAMPS_URL, { cache: 'no-store' })
+            ]);
+
+            const shiftData = shiftRes.ok ? await shiftRes.json() : null;
+            const hourlyDataRaw = hourlyRes.ok ? await hourlyRes.json() : null;
+            const breakdownDataRaw = breakdownRes.ok ? await breakdownRes.json() : null;
+            const adjustmentsData = adjustmentsRes.ok ? await adjustmentsRes.json() : null;
+            const timestampsData = timestampsRes.ok ? await timestampsRes.json() : null;
+
+            const adjTotal = (adjustmentsData && adjustmentsData.total) || 0;
+            const adjHourly = (adjustmentsData && adjustmentsData.hourly) || {};
+
+            const totalCases = Math.max(0, ((shiftData && shiftData.total_cases) || 0) + adjTotal);
+            const totalDowntimeSeconds = (shiftData && shiftData.breakdown_seconds) || 0;
+
+            const hourlyProduction = {};
+            if (hourlyDataRaw) {
+                Object.keys(hourlyDataRaw).forEach((key) => {
+                    const value = (hourlyDataRaw[key] || 0) + (adjHourly[key] || 0);
+                    hourlyProduction[key] = Math.max(0, value);
+                });
+            }
+
+            let breakdowns = [];
+            if (breakdownDataRaw) {
+                breakdowns = Object.values(breakdownDataRaw)
+                    .map((record) => ({ start: record.start * 1000, duration: record.duration }))
+                    .sort((a, b) => a.start - b.start);
+            }
+
+            const shiftStart = (timestampsData && timestampsData.start) || null;
+            const shiftEnd = (timestampsData && timestampsData.end) || Date.now();
+
+            const d = new Date(shiftStart || Date.now());
+            const dateLabel = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+
+            return {
+                date: dateLabel,
+                shift_start: shiftStart,
+                shift_end: shiftEnd,
+                total_cases: totalCases,
+                total_downtime_seconds: totalDowntimeSeconds,
+                breakdown_count: breakdowns.length,
+                hourly_production: hourlyProduction,
+                breakdowns: breakdowns,
+                saved_at: Date.now(),
+                report: null
+            };
+        }
+
+        const updateLastUpdated = () => {
+            const now = new Date();
+            lastUpdatedEl.textContent = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        };
+
+        const updateStatusUI = (status) => {
+            if (status === 'Running') {
+                lineStatusEl.textContent = 'Running';
+                lineStatusEl.className = 'text-3xl md:text-4xl font-bold tracking-tight text-emerald-600 transition-colors';
+                statusCardEl.className = 'glass-panel rounded-2xl p-6 relative overflow-hidden transition-all duration-500 border-t-4 border-t-emerald-500';
+                statusIconBgEl.className = 'w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600 shadow-inner';
+                statusIconEl.className = 'ph-fill ph-check-circle text-3xl';
+                statusPulseEl.classList.remove('hidden');
+            } else if (status === 'Stopped') {
+                lineStatusEl.textContent = 'Stopped';
+                lineStatusEl.className = 'text-3xl md:text-4xl font-bold tracking-tight text-rose-600 transition-colors';
+                statusCardEl.className = 'glass-panel rounded-2xl p-6 relative overflow-hidden transition-all duration-500 border-t-4 border-t-rose-500 bg-rose-50/30';
+                statusIconBgEl.className = 'w-12 h-12 rounded-xl flex items-center justify-center bg-rose-100 text-rose-600 shadow-inner animate-pulse';
+                statusIconEl.className = 'ph-fill ph-warning-octagon text-3xl';
+                statusPulseEl.classList.add('hidden');
+            } else {
+                lineStatusEl.textContent = 'Shift Inactive';
+                lineStatusEl.className = 'text-3xl md:text-4xl font-bold tracking-tight text-slate-400 transition-colors';
+                statusCardEl.className = 'glass-panel rounded-2xl p-6 relative overflow-hidden transition-all duration-500';
+                statusIconBgEl.className = 'w-12 h-12 rounded-xl flex items-center justify-center bg-slate-100 text-slate-500 shadow-sm transition-colors';
+                statusIconEl.className = 'ph ph-power text-3xl';
+                statusPulseEl.classList.add('hidden');
+            }
+        };
+
+        const updateShiftControlUI = (isActive) => {
+            shiftActive = isActive;
+            if (isActive) {
+                toggleShiftBtn.className = 'px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium text-white transition-colors shadow-sm bg-rose-500 hover:bg-rose-600 flex items-center gap-1.5 md:gap-2';
+                toggleShiftIcon.className = 'ph-fill ph-stop-circle text-base md:text-lg';
+                toggleShiftText.textContent = 'End Shift';
+            } else {
+                toggleShiftBtn.className = 'px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium text-white transition-colors shadow-sm bg-emerald-500 hover:bg-emerald-600 flex items-center gap-1.5 md:gap-2';
+                toggleShiftIcon.className = 'ph-fill ph-play-circle text-base md:text-lg';
+                toggleShiftText.textContent = 'Start Shift';
+            }
+        };
+
+        const renderBreakdownList = () => {
+            const activeCount = currentBreakdownStart ? 1 : 0;
+            const totalCount = recentBreakdowns.length + activeCount;
+            
+            totalBreakdownsEl.textContent = totalCount.toLocaleString();
+            historyCountEl.textContent = `${totalCount} records`;
+
+            if (currentBreakdownStart) {
+                const startTimeStr = currentBreakdownStart.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                activeBreakdownBanner.classList.remove('hidden');
+                activeBreakdownBanner.classList.add('flex');
+                activeBreakdownTime.textContent = startTimeStr;
+            } else {
+                activeBreakdownBanner.classList.add('hidden');
+                activeBreakdownBanner.classList.remove('flex');
+            }
+
+            if (totalCount === 0) {
+                breakdownListEl.innerHTML = `
+                    <div class="p-8 text-center flex flex-col items-center justify-center h-full">
+                        <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-3">
+                            <i class="ph ph-check-circle text-3xl text-emerald-400"></i>
+                        </div>
+                        <p class="text-slate-500 font-medium">No breakdowns logged this session!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            
+            if (currentBreakdownStart) {
+                const startTimeStr = currentBreakdownStart.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                html += `
+                    <div class="group flex items-center justify-between p-4 rounded-xl border border-rose-200 bg-rose-50 mb-2 shadow-sm animate-pulse">
+                        <div class="flex items-center gap-4">
+                            <div class="w-10 h-10 rounded-full bg-rose-100 text-rose-500 flex items-center justify-center shrink-0">
+                                <i class="ph-fill ph-warning-octagon text-lg"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold text-rose-700">Line Stopped (Active)</p>
+                                <p class="text-xs text-rose-500 font-medium flex items-center gap-1 mt-0.5">
+                                    <i class="ph ph-clock text-rose-400"></i>
+                                    Since ${startTimeStr}
+                                </p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-rose-200 text-rose-800">
+                                Ongoing
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += recentBreakdowns.map((record) => {
+                const startObj = new Date(record.start);
+                const startTimeStr = startObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                
+                return `
+                    <div class="group flex items-center justify-between p-4 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100 mb-2 bg-white shadow-sm">
+                        <div class="flex items-center gap-4">
+                            <div class="w-10 h-10 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center shrink-0">
+                                <i class="ph-fill ph-warning text-lg"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold text-slate-800">Line Stopped</p>
+                                <p class="text-xs text-slate-500 font-medium flex items-center gap-1 mt-0.5">
+                                    <i class="ph ph-clock text-slate-400"></i>
+                                    ${startTimeStr}
+                                </p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
+                                ${formatDowntime(record.duration)}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            breakdownListEl.innerHTML = html;
+        };
+
+        let fetchErrorCount = 0;
+
+        async function fetchData() {
+            try {
+                const [shiftRes, hourlyRes, breakdownRes, controlRes, adjustmentsRes, timestampsRes] = await Promise.all([
+                    fetch(FIREBASE_URL, { cache: 'no-store' }),
+                    fetch(HOURLY_URL, { cache: 'no-store' }),
+                    fetch(BREAKDOWN_LOG_URL, { cache: 'no-store' }),
+                    fetch(SHIFT_CONTROL_URL, { cache: 'no-store' }),
+                    fetch(ADJUSTMENTS_URL, { cache: 'no-store' }),
+                    fetch(TIMESTAMPS_URL, { cache: 'no-store' })
+                ]);
+                
+                if (timestampsRes && timestampsRes.ok) {
+                    const tsData = await timestampsRes.json();
+                    if (tsData) {
+                        const formatTime = (ts) => {
+                            if (!ts) return '--:--';
+                            return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                        };
+                        document.getElementById('shift-start-display').textContent = formatTime(tsData.start);
+                        document.getElementById('shift-end-display').textContent = formatTime(tsData.end);
+                    } else {
+                        document.getElementById('shift-start-display').textContent = '--:--';
+                        document.getElementById('shift-end-display').textContent = '--:--';
+                    }
+                } else {
+                    document.getElementById('shift-start-display').textContent = '--:--';
+                    document.getElementById('shift-end-display').textContent = '--:--';
+                }
+
+                let adjustmentsData = { total: 0, hourly: {} };
+                if (adjustmentsRes.ok) {
+                    const adjData = await adjustmentsRes.json();
+                    if (adjData) adjustmentsData = adjData;
+                }
+
+                if (controlRes.ok) {
+                    const controlData = await controlRes.json();
+                    if (controlData) {
+                        currentShiftMode = controlData.mode || 'manual';
+                        currentAutoStart = controlData.auto_start || '06:00';
+                        currentAutoEnd = controlData.auto_end || '14:30';
+                        
+                        updateShiftModeUI(currentShiftMode);
+
+                        if (controlData.active !== undefined) {
+                            updateShiftControlUI(controlData.active);
+                        }
+                    }
+                }
+
+                if (breakdownRes.ok) {
+                    const breakdownData = await breakdownRes.json();
+                    if (breakdownData) {
+                        recentBreakdowns = Object.values(breakdownData)
+                            .map(record => ({
+                                start: record.start * 1000,
+                                duration: record.duration
+                            }))
+                            .sort((a, b) => b.start - a.start);
+                    } else {
+                        recentBreakdowns = [];
+                    }
+                }
+
+                if (shiftRes.ok) {
+                    const data = await shiftRes.json();
+                    fetchErrorCount = 0;
+                    
+                    if (data) {
+                        if (data.heartbeat !== undefined) {
+                            if (data.heartbeat !== lastHeartbeatValue) {
+                                lastHeartbeatValue = data.heartbeat;
+                                lastHeartbeatTimestamp = Date.now();
+                            }
+                        }
+
+                        let maxCases = data.total_cases || 0;
+                        if (adjustmentsData.total) maxCases += adjustmentsData.total;
+                        maxCases = Math.max(0, maxCases);
+                        totalCasesEl.textContent = maxCases.toLocaleString();
+                        
+                        const newStatus = data.line_status || 'Unknown';
+                        updateStatusUI(newStatus);
+                        
+                        if (data.active_breakdown_start && data.active_breakdown_start > 0) {
+                            currentBreakdownStart = new Date(data.active_breakdown_start * 1000);
+                        } else {
+                            currentBreakdownStart = null;
+                        }
+                        
+                        renderBreakdownList();
+                        totalDowntimeEl.textContent = formatDowntime(data.breakdown_seconds || 0);
+                    } else {
+                        recentBreakdowns = [];
+                        totalCasesEl.textContent = '0';
+                        totalDowntimeEl.textContent = '0s';
+                        renderBreakdownList();
+                    }
+                }
+
+                if (hourlyRes.ok) {
+                    const hourlyData = await hourlyRes.json();
+                    if (hourlyData) {
+                        const keys = Object.keys(hourlyData).sort((a, b) => a.localeCompare(b)); 
+                        
+                        const tableHtml = keys.map(key => {
+                            let value = hourlyData[key];
+                            if (adjustmentsData.hourly && adjustmentsData.hourly[key]) {
+                                value += adjustmentsData.hourly[key];
+                            }
+                            value = Math.max(0, value);
+                            
+                            return `
+                            <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                                <td class="py-3 px-4 text-sm font-semibold text-slate-800">${key}</td>
+                                <td class="py-3 px-4 text-sm font-bold text-slate-600 text-right">${value.toLocaleString()}</td>
+                            </tr>
+                            `;
+                        }).reverse().join(''); 
+                        
+                        hourlyListEl.innerHTML = tableHtml;
+                    } else {
+                        hourlyListEl.innerHTML = `<tr><td colspan="2" class="py-8 text-center text-slate-500 font-medium">No hourly data available</td></tr>`;
+                    }
+                } else {
+                    hourlyListEl.innerHTML = `<tr><td colspan="2" class="py-8 text-center text-slate-500 font-medium">No hourly data available</td></tr>`;
+                }
+
+                updateLastUpdated();
+
+            } catch (err) {
+                fetchErrorCount++;
+                if (fetchErrorCount >= 3) {
+                    hourlyListEl.innerHTML = `
+                        <tr><td colspan="2">
+                            <div class="p-8 text-center flex flex-col items-center justify-center">
+                                <div class="inline-flex w-12 h-12 rounded-full bg-red-50 text-red-500 items-center justify-center mb-3">
+                                    <i class="ph ph-x-circle text-2xl"></i>
+                                </div>
+                                <p class="text-red-500 font-medium">Connection Error</p>
+                                <p class="text-xs text-slate-500 mt-1">Failed to fetch data after multiple attempts.</p>
+                            </div>
+                        </td></tr>`;
+                }
+            }
+        }
+
+        // Login Logic
+        const loginBtn = document.getElementById('btn-login');
+        const logoutBtn = document.getElementById('btn-logout');
+        const loginModal = document.getElementById('login-modal');
+        const closeLoginBtn = document.getElementById('close-login-btn');
+        const submitLoginBtn = document.getElementById('submit-login-btn');
+        const adminPassword = document.getElementById('admin-password');
+        const loginError = document.getElementById('login-error');
+        
+        const adminShiftControls = document.getElementById('admin-shift-controls');
+        const adminAdjustControls = document.getElementById('admin-adjust-controls');
+        
+        let isAdmin = false;
+
+        const updateAdminUI = () => {
+            if (isAdmin) {
+                loginBtn.classList.add('hidden');
+                adminShiftControls.classList.remove('hidden');
+                adminShiftControls.classList.add('flex');
+                adminAdjustControls.classList.remove('hidden');
+                adminAdjustControls.classList.add('flex');
+            } else {
+                loginBtn.classList.remove('hidden');
+                adminShiftControls.classList.add('hidden');
+                adminShiftControls.classList.remove('flex');
+                adminAdjustControls.classList.add('hidden');
+                adminAdjustControls.classList.remove('flex');
+            }
+        };
+
+        loginBtn.addEventListener('click', () => {
+            loginModal.classList.remove('hidden');
+            loginModal.classList.add('flex');
+            adminPassword.value = '';
+            loginError.classList.add('hidden');
+            setTimeout(() => adminPassword.focus(), 100);
+        });
+
+        const closeLogin = () => {
+            loginModal.classList.add('hidden');
+            loginModal.classList.remove('flex');
+        };
+
+        closeLoginBtn.addEventListener('click', closeLogin);
+
+        const handleLogin = () => {
+            if (adminPassword.value === 'admin123') {
+                isAdmin = true;
+                closeLogin();
+                updateAdminUI();
+            } else {
+                loginError.classList.remove('hidden');
+            }
+        };
+
+        submitLoginBtn.addEventListener('click', handleLogin);
+        adminPassword.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleLogin();
+        });
+
+        logoutBtn.addEventListener('click', () => {
+            isAdmin = false;
+            updateAdminUI();
+        });
+
+        // Automation Settings Modal Logic
+        const settingsModal = document.getElementById('settings-modal');
+        const shiftSettingsBtn = document.getElementById('shift-settings-btn');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const autoModeToggle = document.getElementById('auto-mode-toggle');
+        const autoTimeInputs = document.getElementById('auto-time-inputs');
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        const autoStartInput = document.getElementById('auto-start-input');
+        const autoEndInput = document.getElementById('auto-end-input');
+
+        shiftSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.remove('hidden');
+            settingsModal.classList.add('flex');
+            autoModeToggle.checked = (currentShiftMode === 'auto');
+            autoTimeInputs.classList.toggle('hidden', !autoModeToggle.checked);
+            autoStartInput.value = currentAutoStart;
+            autoEndInput.value = currentAutoEnd;
+        });
+
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.add('hidden');
+            settingsModal.classList.remove('flex');
+        });
+
+        autoModeToggle.addEventListener('change', () => {
+            autoTimeInputs.classList.toggle('hidden', !autoModeToggle.checked);
+        });
+
+        saveSettingsBtn.addEventListener('click', async () => {
+            const newMode = autoModeToggle.checked ? 'auto' : 'manual';
+            const newStart = autoStartInput.value || '06:00';
+            const newEnd = autoEndInput.value || '14:30';
+
+            try {
+                // PATCH request merges into shift_control without dropping the "active" state
+                const res = await fetch(SHIFT_CONTROL_URL, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: newMode, auto_start: newStart, auto_end: newEnd })
+                });
+                
+                if (res.ok) {
+                    currentShiftMode = newMode;
+                    currentAutoStart = newStart;
+                    currentAutoEnd = newEnd;
+                    settingsModal.classList.add('hidden');
+                    settingsModal.classList.remove('flex');
+                    updateShiftModeUI(newMode);
+                }
+            } catch (err) {
+                console.error('Failed to save settings:', err);
+                alert('Failed to save settings. Please try again.');
+            }
+        });
+
+        // Manual Adjust Modal Logic
+        const adjustModal = document.getElementById('adjust-modal');
+        const closeAdjustBtn = document.getElementById('close-adjust-btn');
+        const submitAdjustBtn = document.getElementById('submit-adjust-btn');
+        const manualAdjustAmount = document.getElementById('manual-adjust-amount');
+        const btnAdjustManual = document.getElementById('btn-adjust-manual');
+
+        btnAdjustManual.addEventListener('click', () => {
+            adjustModal.classList.remove('hidden');
+            adjustModal.classList.add('flex');
+            manualAdjustAmount.value = '';
+            setTimeout(() => manualAdjustAmount.focus(), 100);
+        });
+
+        const closeAdjust = () => {
+            adjustModal.classList.add('hidden');
+            adjustModal.classList.remove('flex');
+        };
+
+        closeAdjustBtn.addEventListener('click', closeAdjust);
+
+        submitAdjustBtn.addEventListener('click', () => {
+            const amount = parseInt(manualAdjustAmount.value, 10);
+            if (!isNaN(amount) && amount !== 0) {
+                adjustCases(amount);
+                closeAdjust();
+            } else {
+                alert("Please enter a valid number.");
+            }
+        });
+        
+        manualAdjustAmount.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submitAdjustBtn.click();
+        });
+
+        initApp();
+        updateAdminUI();
+    </script>
+</body>
+</html>

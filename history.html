@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shift History — Factory Dashboard Pro</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Shared Firebase endpoint config (also used by index.html) -->
+    <script src="firebase-config.js"></script>
+
+    <!-- PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.js"></script>
+
+    <!-- Tailwind Config for Custom Colors -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                50: '#f0fdfa',
+                100: '#ccfbf1',
+                500: '#14b8a6',
+                600: '#0d9488',
+                900: '#134e4a',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen bg-slate-50 relative">
+    <div class="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
+        <div class="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-blue-400/10 blur-[100px]"></div>
+        <div class="absolute top-[20%] -right-[10%] w-[40%] h-[60%] rounded-full bg-emerald-400/10 blur-[120px]"></div>
+        <div class="absolute -bottom-[20%] left-[20%] w-[60%] h-[50%] rounded-full bg-indigo-400/10 blur-[120px]"></div>
+    </div>
+
+    <!-- Top Navigation -->
+    <nav class="bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-4 md:px-6 py-3 md:py-4 flex items-center justify-between sticky top-0 z-10">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 md:w-10 md:h-10 bg-brand-600 rounded-lg md:rounded-xl flex items-center justify-center text-white shadow-md">
+                <i class="ph-fill ph-chart-line-up text-lg md:text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-lg md:text-xl font-bold text-slate-900 tracking-tight leading-none">Production History</h1>
+                <p class="text-[10px] md:text-xs text-slate-500 font-medium mt-1">Archived shift records &amp; reports</p>
+            </div>
+        </div>
+        <a href="index.html" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
+            <i class="ph-bold ph-arrow-left text-base md:text-lg"></i>
+            <span class="text-sm md:text-base">Back to Dashboard</span>
+        </a>
+    </nav>
+
+    <!-- Page Body -->
+    <main class="max-w-4xl mx-auto p-4 md:p-8">
+        <div id="page-body">
+            <!-- Populated by JS -->
+        </div>
+    </main>
+
+    <script>
+        const formatDowntime = (seconds) => {
+            if (!seconds) return '0s';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}h ${m}m ${s}s`;
+            if (m > 0) return `${m}m ${s}s`;
+            return `${s}s`;
+        };
+
+        const formatHistoryTime = (ts) => {
+            if (!ts) return '--:--';
+            return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        };
+
+        const formatFullDateTime = (ts) => {
+            if (!ts) return '--';
+            const d = new Date(ts);
+            const datePart = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+            const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            return `${datePart}, ${timePart}`;
+        };
+
+        // --- Helper to calculate Tons based on Variant ---
+        const calculateTons = (variantName, cases) => {
+            const variantData = VARIANTS.find(v => v.name === variantName);
+            if (!variantData) return 0;
+            return (variantData.weight * variantData.packSize * cases) / 1000000;
+        };
+
+        const pageBody = document.getElementById('page-body');
+
+        // =====================================================================
+        // LIST VIEW
+        // =====================================================================
+        async function renderHistoryList() {
+            pageBody.innerHTML = `<div class="text-center py-16 text-slate-400">Loading...</div>`;
+
+            try {
+                const res = await fetch(SHIFT_HISTORY_URL, { cache: 'no-store' });
+                const data = res.ok ? await res.json() : null;
+
+                if (!data) {
+                    pageBody.innerHTML = `<div class="text-center py-16 text-slate-400">No archived shifts yet. They'll show up here after you press Reset Shift.</div>`;
+                    return;
+                }
+
+                const entries = Object.entries(data).sort(([, a], [, b]) => (b.saved_at || 0) - (a.saved_at || 0));
+                const months = new Map();
+                
+                entries.forEach(([key, record]) => {
+                    const d = new Date(record.shift_start || record.saved_at || 0);
+                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    const monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                    if (!months.has(monthKey)) months.set(monthKey, { label: monthLabel, entries: [] });
+                    months.get(monthKey).entries.push([key, record]);
+                });
+
+                const monthKeys = Array.from(months.keys()).sort().reverse();
+
+                pageBody.innerHTML = monthKeys.map((monthKey, monthIdx) => {
+                    const month = months.get(monthKey);
+                    const isFirst = monthIdx === 0;
+                    
+                    let monthlyTotalTons = 0; 
+
+                    const rowsHtml = month.entries.map(([key, record]) => {
+                        const hasReport = !!record.report;
+                        
+                        const shiftTons = (hasReport && record.report.total_tons) ? record.report.total_tons : 0;
+                        monthlyTotalTons += shiftTons;
+
+                        const badge = hasReport
+                            ? `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100"><i class="ph-fill ph-check-circle"></i> Report Ready</span>`
+                            : `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200"><i class="ph-bold ph-circle-dashed"></i> Not Generated</span>`;
+
+                        const shiftTonsDisplay = shiftTons > 0 
+                            ? `<span class="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md font-bold text-xs"><i class="ph-fill ph-scales"></i> ${shiftTons.toFixed(2)} Tons</span>` 
+                            : '';
+
+                        return `
+                            <div class="history-entry-row w-full bg-white border border-slate-200 rounded-2xl p-5 mb-3 hover:border-slate-300 hover:shadow-md transition-all flex items-center gap-3">
+                                <button class="history-entry flex-1 text-left" data-key="${key}">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="font-bold text-lg text-slate-800">${record.date || '--'}</span>
+                                        ${badge}
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                                        <span><i class="ph-fill ph-package mr-1"></i>${(record.total_cases || 0).toLocaleString()} cases</span>
+                                        <span><i class="ph-fill ph-clock mr-1"></i>${formatDowntime(record.total_downtime_seconds || 0)} downtime</span>
+                                        <span>${formatHistoryTime(record.shift_start)} — ${formatHistoryTime(record.shift_end)}</span>
+                                        ${shiftTonsDisplay}
+                                    </div>
+                                </button>
+                                <button class="delete-entry-btn shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors" data-key="${key}" data-date="${record.date || 'this shift'}" title="Delete this shift">
+                                    <i class="ph-bold ph-trash text-lg"></i>
+                                </button>
+                            </div>
+                        `;
+                    }).join('');
+
+                    return `
+                        <div class="month-section mb-4">
+                            <button class="month-toggle w-full flex items-center justify-between bg-slate-100 hover:bg-slate-200 transition-colors rounded-xl px-4 py-3 mb-3" data-month="${monthKey}">
+                                <span class="font-bold text-slate-700 flex items-center gap-2">
+                                    <i class="ph-fill ph-calendar-blank"></i> ${month.label}
+                                    <span class="text-xs font-medium text-slate-500">(${month.entries.length} shift${month.entries.length === 1 ? '' : 's'})</span>
+                                    ${monthlyTotalTons > 0 ? `<span class="ml-2 font-bold text-indigo-700 bg-indigo-100 px-3 py-1 rounded-full text-xs border border-indigo-200 shadow-sm">${monthlyTotalTons.toFixed(2)} Tons Total</span>` : ''}
+                                </span>
+                                <i class="ph-bold ${isFirst ? 'ph-caret-up' : 'ph-caret-down'} month-caret text-slate-500"></i>
+                            </button>
+                            <div class="month-entries ${isFirst ? '' : 'hidden'}" data-month="${monthKey}">
+                                ${rowsHtml}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                document.querySelectorAll('.month-toggle').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        const monthKey = btn.dataset.month;
+                        const panel = document.querySelector(`.month-entries[data-month="${monthKey}"]`);
+                        const caret = btn.querySelector('.month-caret');
+                        const nowHidden = panel.classList.toggle('hidden');
+                        caret.classList.toggle('ph-caret-down', nowHidden);
+                        caret.classList.toggle('ph-caret-up', !nowHidden);
+                    });
+                });
+
+                document.querySelectorAll('.history-entry').forEach((btn) => {
+                    btn.addEventListener('click', () => renderHistoryDetail(btn.dataset.key, data[btn.dataset.key]));
+                });
+
+                document.querySelectorAll('.delete-entry-btn').forEach((btn) => {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const key = btn.dataset.key;
+                        if (!window.confirm(`Permanently delete the shift record for ${btn.dataset.date}? This cannot be undone.`)) return;
+                        try {
+                            const delRes = await fetch(`${SHIFT_HISTORY_BASE}/${key}.json`, { method: 'DELETE' });
+                            if (!delRes.ok) throw new Error('Delete failed');
+                            renderHistoryList();
+                        } catch (err) {
+                            console.error('Failed to delete shift:', err);
+                            alert('Failed to delete this shift. Please check your connection and try again.');
+                        }
+                    });
+                });
+            } catch (err) {
+                console.error('Failed to load shift history:', err);
+                pageBody.innerHTML = `<div class="text-center py-16 text-rose-500">Failed to load shift history. Check your connection.</div>`;
+            }
+        }
+
+        // =====================================================================
+        // DETAIL VIEW (read-only raw record)
+        // =====================================================================
+        function renderHistoryDetail(key, record) {
+            const hourlyEntries = Object.entries(record.hourly_production || {}).sort(([a], [b]) => a.localeCompare(b));
+            const breakdowns = record.breakdowns || [];
+
+            const shiftDurationSeconds = (record.shift_start && record.shift_end)
+                ? Math.max(0, Math.floor((record.shift_end - record.shift_start) / 1000))
+                : null;
+
+            const hourlyRows = hourlyEntries.length > 0
+                ? hourlyEntries.map(([hour, cases]) => `
+                    <tr class="border-b border-slate-50">
+                        <td class="py-2 text-sm text-slate-600">${hour}</td>
+                        <td class="py-2 text-sm text-slate-800 font-medium text-right">${cases.toLocaleString()}</td>
+                    </tr>`).join('')
+                : `<tr><td colspan="2" class="py-6 text-center text-slate-400 text-sm">No hourly data recorded.</td></tr>`;
+
+            const changeoverStartMap = new Map((record.report && record.report.changeovers || []).map((c) => [c.start, c.to]));
+            const breakStartSet = new Set((record.report && record.report.breaks || []).map((b) => b.start));
+
+            const tagBadge = (start) => {
+                if (!record.report) return '';
+                if (changeoverStartMap.has(start)) {
+                    return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-brand-50 text-brand-700 border border-brand-100">Changeover → ${changeoverStartMap.get(start)}</span>`;
+                }
+                if (breakStartSet.has(start)) {
+                    return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-100">Break</span>`;
+                }
+                return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-100">Breakdown</span>`;
+            };
+
+            const breakdownRows = breakdowns.length > 0
+                ? breakdowns.map((b) => `
+                    <tr class="border-b border-slate-50">
+                        <td class="py-2 text-sm text-slate-600">${formatFullDateTime(b.start)}</td>
+                        <td class="py-2 text-sm text-center">${tagBadge(b.start)}</td>
+                        <td class="py-2 text-sm text-slate-800 font-medium text-right">${formatDowntime(b.duration)}</td>
+                    </tr>`).join('')
+                : `<tr><td colspan="3" class="py-6 text-center text-slate-400 text-sm">No breakdowns recorded.</td></tr>`;
+
+            const reportButtonHtml = record.report
+                ? `<button id="regenerate-report-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                       <i class="ph-fill ph-pencil-simple"></i> Edit Tagging / Regenerate
+                   </button>`
+                : `<button id="generate-report-btn" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                       <i class="ph-fill ph-file-plus"></i> Generate Report
+                   </button>`;
+
+            let reportContentHtml = '';
+            if (record.report) {
+                const r = record.report;
+                const variantRows = Object.entries(r.variant_totals || {}).filter(([, cases]) => cases > 0);
+                const variantTotalSum = variantRows.reduce((sum, [, cases]) => sum + cases, 0);
+
+                const variantRowsHtml = variantRows.length > 0
+                    ? variantRows.map(([variant, cases]) => {
+                        const tons = r.variant_tons ? r.variant_tons[variant] : calculateTons(variant, cases);
+                        return `
+                        <tr class="border-b border-slate-50">
+                            <td class="py-2 text-sm text-slate-700">${variant}</td>
+                            <td class="py-2 text-sm text-slate-900 font-semibold text-right">${cases.toLocaleString()}</td>
+                            <td class="py-2 text-sm text-indigo-600 font-bold text-right">${tons.toFixed(2)} t</td>
+                        </tr>`}).join('')
+                    : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-sm">No variant data.</td></tr>`;
+                
+                const variantTotalRowHtml = variantRows.length > 1
+                    ? `<tr class="border-t-2 border-slate-200">
+                           <td class="py-2 text-sm font-bold text-slate-900">Total</td>
+                           <td class="py-2 text-sm font-bold text-slate-900 text-right">${variantTotalSum.toLocaleString()}</td>
+                           <td class="py-2 text-sm font-bold text-indigo-700 text-right">${(r.total_tons || 0).toFixed(2)} t</td>
+                       </tr>`
+                    : '';
+
+                const changeoverRowsHtml = (r.changeovers && r.changeovers.length > 0)
+                    ? r.changeovers.map((c) => `
+                        <tr class="border-b border-slate-50">
+                            <td class="py-2 text-sm text-slate-600">${formatFullDateTime(c.start)}</td>
+                            <td class="py-2 text-sm text-slate-700">→ ${c.to}</td>
+                            <td class="py-2 text-sm text-slate-800 font-medium text-right">${formatDowntime(c.duration)}</td>
+                        </tr>`).join('')
+                    : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-sm">No changeovers tagged.</td></tr>`;
+
+                const breakRowsHtml = (r.breaks && r.breaks.length > 0)
+                    ? r.breaks.map((b) => `
+                        <tr class="border-b border-slate-50">
+                            <td class="py-2 text-sm text-slate-600">${formatFullDateTime(b.start)}</td>
+                            <td class="py-2 text-sm text-slate-800 font-medium text-right">${formatDowntime(b.duration)}</td>
+                        </tr>`).join('')
+                    : `<tr><td colspan="2" class="py-4 text-center text-slate-400 text-sm">No break time tagged.</td></tr>`;
+
+                reportContentHtml = `
+                    <div class="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center gap-2">
+                                <i class="ph-fill ph-check-circle text-emerald-600 text-lg"></i>
+                                <h2 class="text-lg font-bold text-slate-900">Report</h2>
+                            </div>
+                        </div>
+
+                        <!-- OEE Display Row -->
+                        <div class="flex items-center justify-between bg-brand-50 border border-brand-100 rounded-xl p-4 mb-4 flex-wrap gap-4">
+                            <div>
+                                <p class="text-xs text-brand-700 font-semibold uppercase tracking-wide">Shift OEE</p>
+                                <p class="text-3xl font-bold text-brand-900 mt-1">${r.oee_percent ? r.oee_percent.toFixed(2) : '0.00'}%</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-sm text-slate-600 font-medium">Actual Cases: <strong class="text-slate-900">${(record.total_cases || 0).toLocaleString()}</strong></p>
+                                <p class="text-sm text-slate-600 font-medium mt-1">Target Ideal: <strong class="text-slate-900">${r.ideal_cases ? Math.round(r.ideal_cases).toLocaleString() : '0'}</strong></p>
+                                <p class="text-sm text-slate-600 font-medium mt-1">Total Production: <strong class="text-indigo-700 font-bold text-lg">${r.total_tons ? r.total_tons.toFixed(2) : '0.00'} Tons</strong></p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
+                            <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 text-center">
+                                <p class="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">Total Shift Time</p>
+                                <p class="text-lg font-bold text-slate-800 mt-1">${shiftDurationSeconds !== null ? formatDowntime(shiftDurationSeconds) : '--'}</p>
+                            </div>
+                            <div class="bg-rose-50 border border-rose-100 rounded-xl p-3 text-center">
+                                <p class="text-[10px] text-rose-600 font-semibold uppercase tracking-wide">Breakdown Time</p>
+                                <p class="text-lg font-bold text-rose-800 mt-1">${formatDowntime(r.true_downtime_seconds)}</p>
+                            </div>
+                            <div class="bg-brand-50 border border-brand-100 rounded-xl p-3 text-center">
+                                <p class="text-[10px] text-brand-700 font-semibold uppercase tracking-wide">Changeover Time</p>
+                                <p class="text-lg font-bold text-brand-900 mt-1">${formatDowntime(r.changeover_time_seconds)}</p>
+                            </div>
+                            <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
+                                <p class="text-[10px] text-amber-600 font-semibold uppercase tracking-wide">Break Time</p>
+                                <p class="text-lg font-bold text-amber-800 mt-1">${formatDowntime(r.break_time_seconds || 0)}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4 text-sm text-slate-500 mb-6">
+                            <span><i class="ph-fill ph-sign-in mr-1"></i>Start: <strong class="text-slate-700">${formatHistoryTime(record.shift_start)}</strong></span>
+                            <span><i class="ph-fill ph-sign-out mr-1"></i>End: <strong class="text-slate-700">${formatHistoryTime(record.shift_end)}</strong></span>
+                        </div>
+
+                        <h3 class="font-bold text-slate-800 text-sm mb-2">Production by Variant</h3>
+                        <table class="w-full mb-6">
+                            <thead class="text-left text-xs text-slate-500 border-b border-slate-200">
+                                <tr><th class="py-2">Variant</th><th class="py-2 text-right">Cases</th><th class="py-2 text-right">Tons</th></tr>
+                            </thead>
+                            <tbody>${variantRowsHtml}${variantTotalRowHtml}</tbody>
+                        </table>
+
+                        <h3 class="font-bold text-slate-800 text-sm mb-2">Changeover Log</h3>
+                        <table class="w-full mb-6"><tbody>${changeoverRowsHtml}</tbody></table>
+
+                        <h3 class="font-bold text-slate-800 text-sm mb-2">Break Time Log</h3>
+                        <table class="w-full"><tbody>${breakRowsHtml}</tbody></table>
+                    </div>
+
+                    <button id="download-existing-pdf-btn" class="w-full mb-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                        <i class="ph-fill ph-download-simple"></i> Download PDF
+                    </button>
+                    <div class="mb-6">${reportButtonHtml}</div>
+                `;
+            }
+
+            const rawDataHtml = `
+                <div class="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
+                    <h2 class="text-xl font-bold text-slate-900 mb-4">${record.date || 'Shift Details'}</h2>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                        <div class="bg-slate-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center justify-center gap-1">Total Cases <i class="ph-bold ph-pencil-simple text-slate-400"></i></p>
+                            <div class="flex items-center justify-center gap-1.5 mt-1">
+                                <input type="number" id="edit-total-cases" value="${record.total_cases || 0}" class="w-20 text-xl font-bold text-slate-900 text-center bg-transparent border-b-2 border-transparent hover:border-slate-300 focus:border-brand-500 focus:outline-none transition-colors">
+                                <button id="save-total-cases-btn" class="hidden w-6 h-6 rounded-md bg-brand-600 hover:bg-brand-700 text-white items-center justify-center transition-colors" title="Save correction">
+                                    <i class="ph-bold ph-check text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-slate-500 font-medium uppercase tracking-wide">Downtime</p>
+                            <p class="text-xl font-bold text-slate-900 mt-1">${formatDowntime(record.total_downtime_seconds || 0)}</p>
+                        </div>
+                        <div class="bg-slate-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-slate-500 font-medium uppercase tracking-wide">Breakdowns</p>
+                            <p class="text-xl font-bold text-slate-900 mt-1">${record.breakdown_count || 0}</p>
+                        </div>
+                        <div class="bg-slate-50 rounded-xl p-3 text-center">
+                            <p class="text-xs text-slate-500 font-medium uppercase tracking-wide">Shift Time</p>
+                            <p class="text-xl font-bold text-slate-900 mt-1">${shiftDurationSeconds !== null ? formatDowntime(shiftDurationSeconds) : '--'}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 text-sm text-slate-500 mb-6">
+                        <span><i class="ph-fill ph-sign-in mr-1"></i>Start: <strong class="text-slate-700">${formatHistoryTime(record.shift_start)}</strong></span>
+                        <span><i class="ph-fill ph-sign-out mr-1"></i>End: <strong class="text-slate-700">${formatHistoryTime(record.shift_end)}</strong></span>
+                    </div>
+
+                    <h3 class="font-bold text-slate-800 text-sm mb-2">Hourly Production</h3>
+                    <table class="w-full mb-6"><tbody>${hourlyRows}</tbody></table>
+
+                    <h3 class="font-bold text-slate-800 text-sm mb-2">Breakdown History</h3>
+                    <table class="w-full"><tbody>${breakdownRows}</tbody></table>
+                </div>
+            `;
+
+            pageBody.innerHTML = `
+                <button id="back-to-history-list" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 font-medium mb-4">
+                    <i class="ph-bold ph-arrow-left"></i> Back to list
+                </button>
+
+                ${record.report ? reportContentHtml + rawDataHtml : rawDataHtml + reportButtonHtml}
+            `;
+
+            document.getElementById('back-to-history-list').addEventListener('click', renderHistoryList);
+
+            const genBtn = document.getElementById('generate-report-btn') || document.getElementById('regenerate-report-btn');
+            if (genBtn) {
+                genBtn.addEventListener('click', () => renderReportWizard(key, record));
+            }
+
+            const downloadBtn = document.getElementById('download-existing-pdf-btn');
+            if (downloadBtn) {
+                downloadBtn.addEventListener('click', () => generateShiftPDF(record, record.report));
+            }
+
+            const editCasesInput = document.getElementById('edit-total-cases');
+            const saveCasesBtn = document.getElementById('save-total-cases-btn');
+            if(editCasesInput) {
+                editCasesInput.addEventListener('input', () => {
+                    const changed = parseInt(editCasesInput.value, 10) !== (record.total_cases || 0);
+                    saveCasesBtn.classList.toggle('hidden', !changed);
+                    saveCasesBtn.classList.toggle('flex', changed);
+                });
+                saveCasesBtn.addEventListener('click', async () => {
+                    const newValue = parseInt(editCasesInput.value, 10);
+                    if (isNaN(newValue) || newValue < 0) {
+                        alert('Please enter a valid, non-negative number.');
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/total_cases.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newValue)
+                        });
+                        if (!res.ok) throw new Error('Save failed');
+                        record.total_cases = newValue;
+                        saveCasesBtn.classList.add('hidden');
+                        saveCasesBtn.classList.remove('flex');
+                        renderHistoryDetail(key, record);
+                    } catch (err) {
+                        console.error('Failed to save corrected total cases:', err);
+                        alert('Failed to save the correction. Please check your connection and try again.');
+                    }
+                });
+            }
+        }
+
+        // =====================================================================
+        // REPORT WIZARD
+        // =====================================================================
+        function renderReportWizard(key, record) {
+            const breakdowns = record.breakdowns || [];
+            const existing = record.report || null;
+
+            const variantOptions = VARIANTS.map((v) => `<option value="${v.name}">${v.name}</option>`).join('');
+
+            const startingVariantSelect = `
+                <select id="starting-variant" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    ${variantOptions}
+                </select>`;
+
+            const breakdownTagRows = breakdowns.length > 0
+                ? breakdowns.map((b, idx) => {
+                    const wasChangeover = existing && existing.changeovers && existing.changeovers.some((c) => c.start === b.start);
+                    const wasBreak = existing && existing.breaks && existing.breaks.some((br) => br.start === b.start);
+                    const initialType = wasChangeover ? 'changeover' : (wasBreak ? 'break' : 'breakdown');
+                    const taggedTo = wasChangeover ? existing.changeovers.find((c) => c.start === b.start).to : '';
+                    const radioName = `tag-type-${idx}`;
+
+                    const radioOption = (type, label) => `
+                        <label class="flex flex-col items-center gap-1.5 cursor-pointer">
+                            <span class="text-[11px] font-bold text-slate-700 text-center leading-tight">${label}</span>
+                            <input type="radio" name="${radioName}" class="tag-type-radio w-4 h-4 accent-brand-600 cursor-pointer" data-type="${type}" ${initialType === type ? 'checked' : ''}>
+                        </label>
+                    `;
+
+                    return `
+                        <div class="border border-slate-200 rounded-xl p-3.5 mb-2.5 breakdown-tag-row" data-idx="${idx}" data-start="${b.start}" data-duration="${b.duration}" data-tag-type="${initialType}">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="text-sm">
+                                    <p class="font-semibold text-slate-800">${formatFullDateTime(b.start)}</p>
+                                    <div class="flex items-center gap-2 mt-0.5">
+                                        <p class="text-slate-500">${formatDowntime(b.duration)}</p>
+                                        ${b.duration > 60 ? `<button type="button" class="split-btn text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200 transition-colors flex items-center gap-1 shadow-sm" data-idx="${idx}"><i class="ph-bold ph-scissors"></i> Split</button>` : ''}
+                                    </div>
+                                </div>
+                                <div class="flex gap-4 shrink-0">
+                                    ${radioOption('changeover', 'Change over')}
+                                    ${radioOption('break', 'Break')}
+                                    ${radioOption('breakdown', 'Breakdown')}
+                                </div>
+                            </div>
+                            <div class="changeover-to-wrap mt-3 ${initialType === 'changeover' ? '' : 'hidden'}">
+                                <label class="text-xs text-slate-500 font-medium">Changed to: <span class="text-rose-500">*</span></label>
+                                <select class="changeover-to-select w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                                    <option value="" disabled ${taggedTo === '' ? 'selected' : ''}>-- Select Variant --</option>
+                                    ${VARIANTS.map((v) => `<option value="${v.name}" ${v.name === taggedTo ? 'selected' : ''}>${v.name}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                    `;
+                }).join('')
+                : `<p class="text-sm text-slate-400 text-center py-6">No breakdowns recorded this shift — nothing to tag. The report will use a single variant for the whole shift.</p>`;
+
+            pageBody.innerHTML = `
+                <button id="back-to-detail" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 font-medium mb-4">
+                    <i class="ph-bold ph-arrow-left"></i> Back to shift details
+                </button>
+
+                <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 mb-4">
+                    <h2 class="text-xl font-bold text-slate-900 mb-1">Generate Report</h2>
+                    <p class="text-sm text-slate-500 mb-4">${record.date || ''}</p>
+
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5">
+                            <p class="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">Total Shift Time</p>
+                            <p class="text-base font-bold text-slate-800">${(record.shift_start && record.shift_end) ? formatDowntime(Math.max(0, Math.floor((record.shift_end - record.shift_start) / 1000))) : '--'}</p>
+                        </div>
+                        <div class="text-sm text-slate-500">
+                            <div><i class="ph-fill ph-sign-in mr-1"></i>Start: <strong class="text-slate-700">${formatHistoryTime(record.shift_start)}</strong></div>
+                            <div><i class="ph-fill ph-sign-out mr-1"></i>End: <strong class="text-slate-700">${formatHistoryTime(record.shift_end)}</strong></div>
+                        </div>
+                    </div>
+
+                    <label class="block text-sm font-medium text-slate-700 mb-2">Starting Variant</label>
+                    ${startingVariantSelect}
+
+                    <h3 class="font-bold text-slate-800 text-sm mt-6 mb-1">Tag Each Stoppage</h3>
+                    <p class="text-xs text-slate-500 mb-3">Every stoppage defaults to "Breakdown." Mark it as "Changeover" or "Break Time" if it wasn't a real fault.</p>
+                    <div id="breakdown-tag-list">${breakdownTagRows}</div>
+
+                    <button id="calculate-split-btn" class="w-full mt-4 bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2">
+                        <i class="ph-bold ph-calculator"></i> Calculate Variant Split &amp; OEE
+                    </button>
+                </div>
+
+                <div id="variant-split-section" class="hidden bg-white border border-slate-200 rounded-2xl shadow-sm p-6 mb-4">
+                    <!-- OEE Display Container inside Wizard -->
+                    <div id="wizard-oee-display" class="flex items-center justify-between bg-brand-50 border border-brand-100 rounded-xl p-4 mb-6 flex-wrap gap-4">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+
+                    <h3 class="font-bold text-slate-800 text-sm mb-1">Estimated Cases per Variant</h3>
+                    <p class="text-xs text-slate-500 mb-4">Estimated from the hourly production table. Edit any value if you know the real split better.</p>
+                    <div id="variant-split-fields"></div>
+
+                    <div class="grid grid-cols-3 gap-3 mt-4">
+                        <div class="bg-rose-50 border border-rose-100 rounded-xl p-3 text-center">
+                            <p class="text-[10px] text-rose-600 font-semibold uppercase tracking-wide">Breakdown Time</p>
+                            <p id="true-downtime-display" class="text-lg font-bold text-rose-800 mt-1">--</p>
+                        </div>
+                        <div class="bg-brand-50 border border-brand-100 rounded-xl p-3 text-center">
+                            <p class="text-[10px] text-brand-700 font-semibold uppercase tracking-wide">Changeover Time</p>
+                            <p id="changeover-time-display" class="text-lg font-bold text-brand-900 mt-1">--</p>
+                        </div>
+                        <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
+                            <p class="text-[10px] text-amber-600 font-semibold uppercase tracking-wide">Break Time</p>
+                            <p id="break-time-display" class="text-lg font-bold text-amber-800 mt-1">--</p>
+                        </div>
+                    </div>
+
+                    <button id="save-report-btn" class="w-full mt-6 bg-brand-600 hover:bg-brand-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                        <i class="ph-fill ph-floppy-disk"></i> Save Report &amp; Download PDF
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('back-to-detail').addEventListener('click', () => renderHistoryDetail(key, record));
+
+            if (existing && existing.starting_variant) {
+                document.getElementById('starting-variant').value = existing.starting_variant;
+            }
+
+            document.querySelectorAll('.breakdown-tag-row').forEach((row) => {
+                const toWrap = row.querySelector('.changeover-to-wrap');
+                row.querySelectorAll('.tag-type-radio').forEach((radio) => {
+                    radio.addEventListener('change', () => {
+                        if (!radio.checked) return;
+                        const type = radio.dataset.type;
+                        row.dataset.tagType = type;
+                        toWrap.classList.toggle('hidden', type !== 'changeover');
+                    });
+                });
+            });
+
+            // --- NEW: Split Button Logic ---
+            document.querySelectorAll('.split-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const idx = parseInt(btn.dataset.idx, 10);
+                    const b = record.breakdowns[idx];
+                    const maxMins = Math.floor(b.duration / 60);
+                    
+                    const input = window.prompt(`This event is ${maxMins} minutes long.\nHow many minutes do you want to split off into a separate, second event?`);
+                    if (!input) return; // User canceled
+                    
+                    const splitMins = parseInt(input, 10);
+                    if (isNaN(splitMins) || splitMins <= 0 || splitMins >= maxMins) {
+                        alert(`Please enter a valid number of minutes between 1 and ${maxMins - 1}.`);
+                        return;
+                    }
+                    
+                    // Calculate the new durations in seconds
+                    const splitSecs = splitMins * 60;
+                    const remainSecs = b.duration - splitSecs;
+                    
+                    // Create the two new breakdown objects
+                    const newBreakdowns = [...record.breakdowns];
+                    newBreakdowns.splice(idx, 1, 
+                        { start: b.start, duration: remainSecs },
+                        { start: b.start + (remainSecs * 1000), duration: splitSecs }
+                    );
+                    
+                    try {
+                        // Save the newly split raw data back to Firebase permanently
+                        const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newBreakdowns)
+                        });
+                        if (!res.ok) throw new Error('Split save failed');
+                        
+                        // Update local memory and instantly refresh the wizard UI
+                        record.breakdowns = newBreakdowns;
+                        renderReportWizard(key, record); 
+                    } catch (err) {
+                        console.error("Split error:", err);
+                        alert("Failed to split the event. Please check your connection.");
+                    }
+                });
+            });
+
+            let currentReportDraft = null;
+
+            document.getElementById('calculate-split-btn').addEventListener('click', () => {
+                const incompleteRows = Array.from(document.querySelectorAll('.breakdown-tag-row')).filter((row) => {
+                    return row.dataset.tagType === 'changeover' && !row.querySelector('.changeover-to-select').value;
+                });
+                if (incompleteRows.length > 0) {
+                    alert(`Please select a variant for every stoppage tagged "Change over" (${incompleteRows.length} still need one) before calculating the split.`);
+                    return;
+                }
+
+                currentReportDraft = calculateVariantSplit(record);
+                renderVariantSplitFields(currentReportDraft, record);
+                document.getElementById('variant-split-section').classList.remove('hidden');
+                document.getElementById('variant-split-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            });
+
+            document.getElementById('save-report-btn').addEventListener('click', async () => {
+                if (!currentReportDraft) return;
+
+                // Grab manual overrides from inputs and save the final tonnages
+                let finalTotalTons = 0;
+                document.querySelectorAll('.variant-total-input').forEach((input) => {
+                    const variant = input.dataset.variant;
+                    const value = parseInt(input.value, 10);
+                    const finalCases = isNaN(value) ? 0 : value;
+                    currentReportDraft.variant_totals[variant] = finalCases;
+                    
+                    const tons = calculateTons(variant, finalCases);
+                    currentReportDraft.variant_tons[variant] = tons;
+                    finalTotalTons += tons;
+                });
+                currentReportDraft.total_tons = finalTotalTons;
+
+                try {
+                    const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/report.json`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentReportDraft)
+                    });
+                    if (!res.ok) throw new Error('Save failed');
+
+                    record.report = currentReportDraft;
+                    generateShiftPDF(record, currentReportDraft);
+                    alert('Report saved. PDF download should start automatically.');
+                    renderHistoryDetail(key, record);
+                } catch (err) {
+                    console.error('Failed to save report:', err);
+                    alert('Failed to save the report. Please check your connection and try again.');
+                }
+            });
+
+            if (existing) {
+                currentReportDraft = existing;
+                renderVariantSplitFields(existing, record);
+                document.getElementById('variant-split-section').classList.remove('hidden');
+            }
+        }
+
+        function renderVariantSplitFields(report, record) {
+            const container = document.getElementById('variant-split-fields');
+            container.innerHTML = Object.entries(report.variant_totals).map(([variant, cases]) => {
+                const currentTons = report.variant_tons ? report.variant_tons[variant] : calculateTons(variant, cases);
+                const safeId = variant.replace(/\s+/g, '-');
+                return `
+                <div class="flex items-center justify-between gap-3 mb-2">
+                    <span class="text-sm font-medium text-slate-700">${variant} <span class="text-xs text-indigo-600 font-bold ml-2" id="tons-display-${safeId}">(${currentTons.toFixed(2)} Tons)</span></span>
+                    <input type="number" class="variant-total-input w-32 border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-500" data-variant="${variant}" value="${cases}">
+                </div>
+            `}).join('');
+
+            const oeeContainer = document.getElementById('wizard-oee-display');
+            oeeContainer.innerHTML = `
+                <div>
+                    <p class="text-xs text-brand-700 font-semibold uppercase tracking-wide">Calculated Shift OEE</p>
+                    <p class="text-3xl font-bold text-brand-900 mt-1">${report.oee_percent ? report.oee_percent.toFixed(2) : '0.00'}%</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-slate-600 font-medium">Actual Cases: <strong class="text-slate-900">${(record.total_cases || 0).toLocaleString()}</strong></p>
+                    <p class="text-sm text-slate-600 font-medium mt-1">Target Ideal: <strong class="text-slate-900">${report.ideal_cases ? Math.round(report.ideal_cases).toLocaleString() : '0'}</strong></p>
+                    <p class="text-sm text-slate-600 font-medium mt-1">Total Production: <strong id="wizard-total-tons-display" class="text-indigo-700 font-bold text-lg">${report.total_tons ? report.total_tons.toFixed(2) : '0.00'} Tons</strong></p>
+                </div>
+            `;
+
+            document.getElementById('true-downtime-display').textContent = formatDowntime(report.true_downtime_seconds);
+            document.getElementById('changeover-time-display').textContent = formatDowntime(report.changeover_time_seconds);
+            document.getElementById('break-time-display').textContent = formatDowntime(report.break_time_seconds || 0);
+
+            // Live updates for Tons if user changes manual inputs
+            const updateLiveTons = () => {
+                let newTotalTons = 0;
+                document.querySelectorAll('.variant-total-input').forEach((input) => {
+                    const variant = input.dataset.variant;
+                    const value = parseInt(input.value, 10) || 0;
+                    const tons = calculateTons(variant, value);
+                    newTotalTons += tons;
+                    
+                    const displayEl = document.getElementById(`tons-display-${variant.replace(/\s+/g, '-')}`);
+                    if (displayEl) displayEl.textContent = `(${tons.toFixed(2)} Tons)`;
+                });
+                const totalDisplay = document.getElementById('wizard-total-tons-display');
+                if (totalDisplay) totalDisplay.textContent = `${newTotalTons.toFixed(2)} Tons`;
+            };
+
+            document.querySelectorAll('.variant-total-input').forEach(input => {
+                input.addEventListener('input', updateLiveTons);
+            });
+        }
+
+        function calculateVariantSplit(record) {
+            const startingVariant = document.getElementById('starting-variant').value;
+
+            const taggedChangeovers = [];
+            const taggedBreaks = [];
+            document.querySelectorAll('.breakdown-tag-row').forEach((row) => {
+                const type = row.dataset.tagType;
+                const start = parseInt(row.dataset.start, 10);
+                const duration = parseInt(row.dataset.duration, 10);
+
+                if (type === 'changeover') {
+                    taggedChangeovers.push({ start, duration, to: row.querySelector('.changeover-to-select').value });
+                } else if (type === 'break') {
+                    taggedBreaks.push({ start, duration });
+                }
+            });
+            taggedChangeovers.sort((a, b) => a.start - b.start);
+
+            const dayRef = new Date(record.shift_start || record.saved_at || Date.now());
+            const refYear = dayRef.getFullYear();
+            const refMonth = dayRef.getMonth();
+            const refDate = dayRef.getDate();
+
+            const buckets = Object.entries(record.hourly_production || {}).map(([label, cases]) => {
+                const startHour = parseInt(label.split('-')[0].split(':')[0], 10);
+                const startMs = new Date(refYear, refMonth, refDate, startHour, 0, 0, 0).getTime();
+                return { startMs, endMs: startMs + 3600000, cases };
+            });
+
+            const segments = [];
+            let cursorStart = record.shift_start || (buckets[0] ? buckets[0].startMs : Date.now());
+            let cursorVariant = startingVariant;
+            taggedChangeovers.forEach((c) => {
+                segments.push({ variant: cursorVariant, start: cursorStart, end: c.start });
+                cursorStart = c.start + c.duration * 1000;
+                cursorVariant = c.to;
+            });
+            segments.push({ variant: cursorVariant, start: cursorStart, end: record.shift_end || Date.now() });
+
+            let totalIdealCases = 0;
+            segments.forEach((seg) => {
+                const segDurationMs = Math.max(0, seg.end - seg.start);
+                let breakMsInSeg = 0;
+                
+                taggedBreaks.forEach((b) => {
+                    if (b.start >= seg.start && b.start < seg.end) {
+                        breakMsInSeg += (b.duration * 1000);
+                    }
+                });
+
+                const plannedMs = Math.max(0, segDurationMs - breakMsInSeg);
+                const plannedMins = plannedMs / 60000;
+
+                const variantObj = VARIANTS.find(v => v.name === seg.variant);
+                const targetCPM = variantObj ? variantObj.cpm : 0;
+                
+                totalIdealCases += (plannedMins * targetCPM);
+            });
+
+            const actualCases = record.total_cases || 0;
+            const oeePercent = totalIdealCases > 0 ? (actualCases / totalIdealCases) * 100 : 0;
+
+            const variantTotals = {};
+            const usedVariants = new Set(segments.map((seg) => seg.variant));
+            usedVariants.forEach((v) => { variantTotals[v] = 0; });
+
+            segments.forEach((seg) => {
+                buckets.forEach((bucket) => {
+                    const overlapStart = Math.max(bucket.startMs, seg.start);
+                    const overlapEnd = Math.min(bucket.endMs, seg.end);
+                    if (overlapEnd > overlapStart) {
+                        const fraction = (overlapEnd - overlapStart) / (bucket.endMs - bucket.startMs);
+                        variantTotals[seg.variant] = (variantTotals[seg.variant] || 0) + fraction * bucket.cases;
+                    }
+                });
+            });
+
+            // Calculate Initial Tons
+            const variantTons = {};
+            let totalTons = 0;
+            Object.keys(variantTotals).forEach((v) => {
+                variantTotals[v] = Math.round(variantTotals[v]);
+                const t = calculateTons(v, variantTotals[v]);
+                variantTons[v] = t;
+                totalTons += t;
+            });
+
+            const taggedChangeoverStarts = new Set(taggedChangeovers.map((c) => c.start));
+            const taggedBreakStarts = new Set(taggedBreaks.map((b) => b.start));
+            const trueBreakdowns = (record.breakdowns || []).filter((b) => !taggedChangeoverStarts.has(b.start) && !taggedBreakStarts.has(b.start));
+            
+            const trueDowntimeSeconds = trueBreakdowns.reduce((sum, b) => sum + b.duration, 0);
+            const changeoverTimeSeconds = taggedChangeovers.reduce((sum, c) => sum + c.duration, 0);
+            const breakTimeSeconds = taggedBreaks.reduce((sum, b) => sum + b.duration, 0);
+
+            return {
+                starting_variant: startingVariant,
+                changeovers: taggedChangeovers,
+                breaks: taggedBreaks,
+                variant_totals: variantTotals,
+                variant_tons: variantTons,
+                total_tons: totalTons,
+                true_downtime_seconds: trueDowntimeSeconds,
+                changeover_time_seconds: changeoverTimeSeconds,
+                break_time_seconds: breakTimeSeconds,
+                true_breakdown_count: trueBreakdowns.length,
+                ideal_cases: totalIdealCases,
+                oee_percent: oeePercent,
+                generated_at: Date.now()
+            };
+        }
+
+        // =====================================================================
+        // PDF GENERATION
+        // =====================================================================
+        function generateShiftPDF(record, report) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            // --- Header ---
+            doc.setTextColor(15, 23, 42); 
+            doc.setFontSize(20);
+            doc.setFont(undefined, 'bold');
+            doc.text('Shift Production Report', 14, 18);
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(100, 116, 139); 
+            doc.text(`Generated ${formatFullDateTime(Date.now())}`, 14, 25);
+            doc.setDrawColor(226, 232, 240); 
+            doc.line(14, 30, 196, 30);
+
+            // --- Summary stat row ---
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(11);
+            let y = 44;
+            const shiftDurationSeconds = (record.shift_start && record.shift_end)
+                ? Math.max(0, Math.floor((record.shift_end - record.shift_start) / 1000))
+                : null;
+
+            const summaryLines = [
+                [`Date`, record.date || '--'],
+                [`Shift Start`, formatFullDateTime(record.shift_start)],
+                [`Shift End`, formatFullDateTime(record.shift_end)],
+                [`Total Shift Time`, shiftDurationSeconds !== null ? formatDowntime(shiftDurationSeconds) : '--'],
+                [`Break Time`, formatDowntime(report.break_time_seconds || 0)],
+                [`Breakdown Time`, formatDowntime(report.true_downtime_seconds)],
+                [`Changeover Time`, formatDowntime(report.changeover_time_seconds)],
+                [`Breakdown Events`, String(report.true_breakdown_count)],
+                [`Target Cases (Ideal)`, report.ideal_cases ? Math.round(report.ideal_cases).toLocaleString() : '0'],
+                [`Total Cases (Actual)`, (record.total_cases || 0).toLocaleString()],
+                [`Total Production (Tons)`, report.total_tons ? `${report.total_tons.toFixed(2)} Tons` : '0.00 Tons'],
+                [`Shift OEE`, report.oee_percent ? `${report.oee_percent.toFixed(2)}%` : '0.00%']
+            ];
+            
+            summaryLines.forEach(([label, value]) => {
+                doc.setFont(undefined, 'bold');
+                doc.text(`${label}:`, 14, y);
+                doc.setFont(undefined, 'normal');
+                doc.text(String(value), 65, y);
+                y += 7;
+            });
+
+            let nextY = y + 6;
+
+            const variantRows = Object.entries(report.variant_totals).filter(([, cases]) => cases > 0);
+            if (variantRows.length > 0) {
+                doc.setFont(undefined, 'bold');
+                doc.setFontSize(12);
+                doc.text('Production by Variant', 14, nextY);
+                
+                // Add Tons to PDF Variant table
+                const variantBody = variantRows.map(([v, c]) => {
+                    const t = report.variant_tons ? report.variant_tons[v] : calculateTons(v, c);
+                    return [v, c.toLocaleString(), t.toFixed(2) + ' t'];
+                });
+
+                if (variantRows.length > 1) {
+                    const total = variantRows.reduce((sum, [, c]) => sum + c, 0);
+                    variantBody.push(['Total', total.toLocaleString(), (report.total_tons || 0).toFixed(2) + ' t']);
+                }
+
+                doc.autoTable({
+                    startY: nextY + 4,
+                    head: [['Variant', 'Cases Produced', 'Tons']],
+                    body: variantBody,
+                    theme: 'grid',
+                    headStyles: { fillColor: [30, 41, 59] },
+                    didParseCell: (data) => {
+                        if (variantRows.length > 1 && data.row.index === variantBody.length - 1) {
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                    }
+                });
+                nextY = doc.lastAutoTable.finalY + 12;
+            }
+
+            if (report.changeovers && report.changeovers.length > 0) {
+                doc.setFont(undefined, 'bold');
+                doc.setFontSize(12);
+                doc.text('Changeover Log', 14, nextY);
+                doc.autoTable({
+                    startY: nextY + 4,
+                    head: [['Time', 'Changed To', 'Duration']],
+                    body: report.changeovers.map((c) => [formatFullDateTime(c.start), c.to, formatDowntime(c.duration)]),
+                    theme: 'grid',
+                    headStyles: { fillColor: [13, 148, 136] }
+                });
+                nextY = doc.lastAutoTable.finalY + 12;
+            }
+
+            if (report.breaks && report.breaks.length > 0) {
+                doc.setFont(undefined, 'bold');
+                doc.setFontSize(12);
+                doc.text('Break Time Log', 14, nextY);
+                doc.autoTable({
+                    startY: nextY + 4,
+                    head: [['Time', 'Duration']],
+                    body: report.breaks.map((b) => [formatFullDateTime(b.start), formatDowntime(b.duration)]),
+                    theme: 'grid',
+                    headStyles: { fillColor: [217, 119, 6] } 
+                });
+                nextY = doc.lastAutoTable.finalY + 12;
+            }
+
+            const changeoverStarts = new Set((report.changeovers || []).map((c) => c.start));
+            const breakStarts = new Set((report.breaks || []).map((b) => b.start));
+            const trueBreakdowns = (record.breakdowns || []).filter((b) => !changeoverStarts.has(b.start) && !breakStarts.has(b.start));
+            if (trueBreakdowns.length > 0) {
+                doc.setFont(undefined, 'bold');
+                doc.setFontSize(12);
+                doc.text('Breakdown Log', 14, nextY);
+                doc.autoTable({
+                    startY: nextY + 4,
+                    head: [['Started', 'Duration']],
+                    body: trueBreakdowns.map((b) => [formatFullDateTime(b.start), formatDowntime(b.duration)]),
+                    theme: 'grid',
+                    headStyles: { fillColor: [190, 18, 60] }
+                });
+                nextY = doc.lastAutoTable.finalY + 12;
+            }
+
+            const hourlyEntries = Object.entries(record.hourly_production || {}).sort((a, b) => a[0].localeCompare(b[0]));
+            if (hourlyEntries.length > 0) {
+                doc.setFont(undefined, 'bold');
+                doc.setFontSize(12);
+                doc.text('Hourly Production', 14, nextY);
+                doc.autoTable({
+                    startY: nextY + 4,
+                    head: [['Hour', 'Cases Produced']],
+                    body: hourlyEntries.map(([h, c]) => [h, c.toLocaleString()]),
+                    theme: 'grid',
+                    headStyles: { fillColor: [71, 85, 105] }
+                });
+            }
+
+            doc.save(`Shift_Report_${record.date || 'unknown'}.pdf`);
+        }
+
+        // Start
+        renderHistoryList();
+    </script>
+</body>
+</html>

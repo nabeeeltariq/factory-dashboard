@@ -1,0 +1,6 @@
+{
+  "name": "Factory Dashboard",
+  "description": "A real-time factory conveyor line dashboard displaying total cases, line status, and breakdown history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
