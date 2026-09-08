@@ -1,15 +1,10 @@
 {
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "name": "factory-dashboard",
+  "version": "1.0.0",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "echo 'Skipping build, serving static files'"
   },
-  "dependencies": {},
-  "devDependencies": {
-    "vite": "^6.2.3"
+  "dependencies": {
+    "@google/generative-ai": "^0.2.0"
   }
 }
