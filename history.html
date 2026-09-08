@@ -1075,29 +1075,7 @@
         renderHistoryList();
 
         // --- NEW AI CHAT LOGIC ---
-        const fab = document.getElementById('chat-fab');
-        const backdrop = document.getElementById('chat-modal-backdrop');
-        const modal = document.getElementById('chat-modal-content');
-        const closeBtn = document.getElementById('close-chat');
-        const historyDiv = document.getElementById('chat-history');
-        const input = document.getElementById('user-input');
-        const sendBtn = document.getElementById('send-btn');
-
-        function toggleChat(show) {
-            if(show) {
-                backdrop.classList.remove('opacity-0', 'pointer-events-none');
-                modal.classList.remove('opacity-0', 'scale-95');
-                setTimeout(() => input.focus(), 100);
-            } else {
-                backdrop.classList.add('opacity-0', 'pointer-events-none');
-                modal.classList.add('opacity-0', 'scale-95');
-            }
-        }
-
-        fab.addEventListener('click', () => toggleChat(true));
-        closeBtn.addEventListener('click', () => toggleChat(false));
-        backdrop.addEventListener('click', (e) => { if(e.target === backdrop) toggleChat(false); });
-
+        // --- 1. Updated Message Display (Cleans up asterisks & handles loading state) ---
         function addMessage(text, isBot) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex items-start gap-4 ${isBot ? '' : 'justify-end'}`;
@@ -1105,24 +1083,35 @@
             const avatar = isBot ? `<div class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center mt-1"><i class="ph-bold ph-robot text-lg"></i></div>` : '';
             const bubbleClass = isBot ? 'bg-white rounded-tl-none border-slate-100 text-slate-800' : 'bg-teal-600 rounded-tr-none text-white';
 
+            let contentHtml = text;
+
+            // Handle animated loading dots state
+            if (text === '...loading...') {
+                contentHtml = `<div class="flex gap-2 p-2 items-center">
+                                <span class="text-xs text-slate-400 font-medium mr-1">Analysing factory data</span>
+                                <div class="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style="animation-delay: -0.3s"></div>
+                                <div class="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style="animation-delay: -0.15s"></div>
+                                <div class="w-2 h-2 bg-teal-600 rounded-full animate-bounce"></div>
+                               </div>`;
+            } else if (isBot) {
+                // Clean up raw asterisks and format bullet points/bold text cleanly
+                contentHtml = text
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-950">$1</strong>') // Convert **bold**
+                    .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') // Convert *italic*
+                    .replace(/^\* /gm, '• ') // Convert bullet points to clean dots
+                    .replace(/\n/g, '<br>'); // Preserve line breaks
+            }
+
             wrapper.innerHTML = `
                 ${avatar}
-                <div class="p-4 rounded-2xl shadow-sm border ${bubbleClass} max-w-[85%] whitespace-pre-wrap">${text}</div>
+                <div class="p-4 rounded-2xl shadow-sm border ${bubbleClass} max-w-[85%] leading-relaxed">${contentHtml}</div>
             `;
             historyDiv.appendChild(wrapper);
             historyDiv.scrollTop = historyDiv.scrollHeight;
+            return wrapper; // Return reference so we can remove it when loading finishes
         }
 
-        function addGraph(config) {
-            const canvasId = 'chart-' + Date.now();
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex items-start gap-4';
-            wrapper.innerHTML = `<div class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center mt-1"><i class="ph-bold ph-chart-bar text-lg"></i></div><div class="p-5 bg-white rounded-2xl rounded-tl-none shadow-sm border border-slate-100 w-full max-w-[85%] h-80"><canvas id="${canvasId}"></canvas></div>`;
-            historyDiv.appendChild(wrapper);
-            historyDiv.scrollTop = historyDiv.scrollHeight;
-            try { new Chart(document.getElementById(canvasId).getContext('2d'), config); } catch(e) { console.error(e); }
-        }
-
+        // --- 2. Updated Communication Logic with Loading State ---
         async function sendMessage() {
             const msg = input.value.trim();
             if(!msg) return;
@@ -1130,8 +1119,13 @@
             input.value = '';
             input.disabled = true;
             sendBtn.disabled = true;
+            sendBtn.textContent = 'Thinking...';
             
+            // Add user message
             addMessage(msg, false);
+            
+            // Add temporary loading indicator bubble
+            const loadingBubble = addMessage('...loading...', true);
             
             try {
                 const response = await fetch('/.netlify/functions/chat', {
@@ -1143,6 +1137,9 @@
                 const data = await response.json();
                 const reply = data.reply;
                 
+                // Remove loading indicator
+                historyDiv.removeChild(loadingBubble);
+                
                 const jsonMatch = reply.match(/```json([\s\S]*?)```/);
                 if(jsonMatch) {
                     addGraph(JSON.parse(jsonMatch[1]));
@@ -1152,16 +1149,15 @@
                     addMessage(reply, true);
                 }
             } catch(e) {
+                historyDiv.removeChild(loadingBubble);
                 addMessage("Connection error. Cannot reach AI server.", true);
             } finally {
                 input.disabled = false;
                 sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
                 input.focus();
             }
         }
-
-        sendBtn.addEventListener('click', sendMessage);
-        input.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendMessage(); });
     </script>
 </body>
 </html>
