@@ -5,6 +5,6 @@
     "build": "echo 'Skipping build, serving static files'"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.2.0"
+    "@google/generative-ai": "latest"
   }
 }
