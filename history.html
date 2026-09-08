@@ -11,6 +11,9 @@
     <!-- Phosphor Icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
+    <!-- Chart.js CDN for AI Graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <!-- Shared Firebase endpoint config (also used by index.html) -->
     <script src="firebase-config.js"></script>
 
@@ -85,6 +88,49 @@
         </div>
     </main>
 
+    <!-- Floating AI Assistant Pop-up (Modal) -->
+    <button id="chat-fab" class="fixed bottom-6 right-6 p-4 bg-teal-600 text-white rounded-full shadow-lg hover:bg-teal-700 hover:scale-105 transition-all z-40">
+        <i class="ph ph-chat-centered-text text-3xl"></i>
+    </button>
+
+    <div id="chat-modal-backdrop" class="fixed inset-0 bg-slate-900/60 z-50 p-4 md:p-10 flex items-center justify-center opacity-0 pointer-events-none transition-opacity">
+        <div id="chat-modal-content" class="bg-white w-full max-w-2xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 opacity-0 transition-all">
+            
+            <!-- Header -->
+            <header class="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                <div class="flex items-center gap-4">
+                    <div class="p-2.5 bg-teal-100 text-teal-600 rounded-lg"><i class="ph-bold ph-robot text-2xl"></i></div>
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-950">Factory AI Analyst</h2>
+                        <p class="text-sm text-green-600 font-medium flex items-center gap-1">
+                            <span class="w-2.5 h-2.5 bg-green-500 rounded-full"></span> Online
+                        </p>
+                    </div>
+                </div>
+                <button id="close-chat" class="p-2 rounded-full hover:bg-slate-100 text-slate-400 transition"><i class="ph-bold ph-x text-2xl"></i></button>
+            </header>
+
+            <!-- Chat History -->
+            <div id="chat-history" class="flex-grow p-5 space-y-6 overflow-y-auto bg-slate-50/50">
+                <div class="flex items-start gap-4">
+                    <div class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center mt-1"><i class="ph-bold ph-robot text-lg"></i></div>
+                    <div class="p-4 bg-white rounded-2xl rounded-tl-none shadow-sm border border-slate-100 max-w-[85%]">
+                        <p class="text-slate-800">Hello! I am your AI Production Analyst. I have full access to your saved shift reports. How can I help you today?</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <footer class="p-4 bg-white border-t border-slate-100 sticky bottom-0">
+                <div class="flex items-center gap-3">
+                    <input type="text" id="user-input" placeholder="Ask about shift data..." class="flex-grow px-5 py-3.5 bg-slate-100 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 transition">
+                    <button id="send-btn" class="px-6 py-3.5 bg-teal-600 text-white rounded-xl font-semibold hover:bg-teal-700 transition">Send</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- MAIN HISTORY LOGIC -->
     <script>
         const formatDowntime = (seconds) => {
             if (!seconds) return '0s';
@@ -109,7 +155,6 @@
             return `${datePart}, ${timePart}`;
         };
 
-        // --- Helper to calculate Tons based on Variant ---
         const calculateTons = (variantName, cases) => {
             const variantData = VARIANTS.find(v => v.name === variantName);
             if (!variantData) return 0;
@@ -118,9 +163,6 @@
 
         const pageBody = document.getElementById('page-body');
 
-        // =====================================================================
-        // LIST VIEW
-        // =====================================================================
         async function renderHistoryList() {
             pageBody.innerHTML = `<div class="text-center py-16 text-slate-400">Loading...</div>`;
 
@@ -240,9 +282,6 @@
             }
         }
 
-        // =====================================================================
-        // DETAIL VIEW (read-only raw record)
-        // =====================================================================
         function renderHistoryDetail(key, record) {
             const hourlyEntries = Object.entries(record.hourly_production || {}).sort(([a], [b]) => a.localeCompare(b));
             const breakdowns = record.breakdowns || [];
@@ -493,9 +532,6 @@
             }
         }
 
-        // =====================================================================
-        // REPORT WIZARD
-        // =====================================================================
         function renderReportWizard(key, record) {
             const breakdowns = record.breakdowns || [];
             const existing = record.report || null;
@@ -631,7 +667,6 @@
                 });
             });
 
-            // --- NEW: Split Button Logic ---
             document.querySelectorAll('.split-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const idx = parseInt(btn.dataset.idx, 10);
@@ -647,11 +682,9 @@
                         return;
                     }
                     
-                    // Calculate the new durations in seconds
                     const splitSecs = splitMins * 60;
                     const remainSecs = b.duration - splitSecs;
                     
-                    // Create the two new breakdown objects
                     const newBreakdowns = [...record.breakdowns];
                     newBreakdowns.splice(idx, 1, 
                         { start: b.start, duration: remainSecs },
@@ -659,7 +692,6 @@
                     );
                     
                     try {
-                        // Save the newly split raw data back to Firebase permanently
                         const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -667,7 +699,6 @@
                         });
                         if (!res.ok) throw new Error('Split save failed');
                         
-                        // Update local memory and instantly refresh the wizard UI
                         record.breakdowns = newBreakdowns;
                         renderReportWizard(key, record); 
                     } catch (err) {
@@ -697,7 +728,6 @@
             document.getElementById('save-report-btn').addEventListener('click', async () => {
                 if (!currentReportDraft) return;
 
-                // Grab manual overrides from inputs and save the final tonnages
                 let finalTotalTons = 0;
                 document.querySelectorAll('.variant-total-input').forEach((input) => {
                     const variant = input.dataset.variant;
@@ -765,7 +795,6 @@
             document.getElementById('changeover-time-display').textContent = formatDowntime(report.changeover_time_seconds);
             document.getElementById('break-time-display').textContent = formatDowntime(report.break_time_seconds || 0);
 
-            // Live updates for Tons if user changes manual inputs
             const updateLiveTons = () => {
                 let newTotalTons = 0;
                 document.querySelectorAll('.variant-total-input').forEach((input) => {
@@ -863,7 +892,6 @@
                 });
             });
 
-            // Calculate Initial Tons
             const variantTons = {};
             let totalTons = 0;
             Object.keys(variantTotals).forEach((v) => {
@@ -898,14 +926,10 @@
             };
         }
 
-        // =====================================================================
-        // PDF GENERATION
-        // =====================================================================
         function generateShiftPDF(record, report) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
 
-            // --- Header ---
             doc.setTextColor(15, 23, 42); 
             doc.setFontSize(20);
             doc.setFont(undefined, 'bold');
@@ -917,7 +941,6 @@
             doc.setDrawColor(226, 232, 240); 
             doc.line(14, 30, 196, 30);
 
-            // --- Summary stat row ---
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(11);
             let y = 44;
@@ -956,7 +979,6 @@
                 doc.setFontSize(12);
                 doc.text('Production by Variant', 14, nextY);
                 
-                // Add Tons to PDF Variant table
                 const variantBody = variantRows.map(([v, c]) => {
                     const t = report.variant_tons ? report.variant_tons[v] : calculateTons(v, c);
                     return [v, c.toLocaleString(), t.toFixed(2) + ' t'];
@@ -1044,8 +1066,96 @@
             doc.save(`Shift_Report_${record.date || 'unknown'}.pdf`);
         }
 
-        // Start
         renderHistoryList();
+
+        // --- NEW AI CHAT LOGIC ---
+        const fab = document.getElementById('chat-fab');
+        const backdrop = document.getElementById('chat-modal-backdrop');
+        const modal = document.getElementById('chat-modal-content');
+        const closeBtn = document.getElementById('close-chat');
+        const historyDiv = document.getElementById('chat-history');
+        const input = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        function toggleChat(show) {
+            if(show) {
+                backdrop.classList.remove('opacity-0', 'pointer-events-none');
+                modal.classList.remove('opacity-0', 'scale-95');
+                setTimeout(() => input.focus(), 100);
+            } else {
+                backdrop.classList.add('opacity-0', 'pointer-events-none');
+                modal.classList.add('opacity-0', 'scale-95');
+            }
+        }
+
+        fab.addEventListener('click', () => toggleChat(true));
+        closeBtn.addEventListener('click', () => toggleChat(false));
+        backdrop.addEventListener('click', (e) => { if(e.target === backdrop) toggleChat(false); });
+
+        function addMessage(text, isBot) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex items-start gap-4 ${isBot ? '' : 'justify-end'}`;
+            
+            const avatar = isBot ? `<div class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center mt-1"><i class="ph-bold ph-robot text-lg"></i></div>` : '';
+            const bubbleClass = isBot ? 'bg-white rounded-tl-none border-slate-100 text-slate-800' : 'bg-teal-600 rounded-tr-none text-white';
+
+            wrapper.innerHTML = `
+                ${avatar}
+                <div class="p-4 rounded-2xl shadow-sm border ${bubbleClass} max-w-[85%] whitespace-pre-wrap">${text}</div>
+            `;
+            historyDiv.appendChild(wrapper);
+            historyDiv.scrollTop = historyDiv.scrollHeight;
+        }
+
+        function addGraph(config) {
+            const canvasId = 'chart-' + Date.now();
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex items-start gap-4';
+            wrapper.innerHTML = `<div class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center mt-1"><i class="ph-bold ph-chart-bar text-lg"></i></div><div class="p-5 bg-white rounded-2xl rounded-tl-none shadow-sm border border-slate-100 w-full max-w-[85%] h-80"><canvas id="${canvasId}"></canvas></div>`;
+            historyDiv.appendChild(wrapper);
+            historyDiv.scrollTop = historyDiv.scrollHeight;
+            try { new Chart(document.getElementById(canvasId).getContext('2d'), config); } catch(e) { console.error(e); }
+        }
+
+        async function sendMessage() {
+            const msg = input.value.trim();
+            if(!msg) return;
+            
+            input.value = '';
+            input.disabled = true;
+            sendBtn.disabled = true;
+            
+            addMessage(msg, false);
+            
+            try {
+                const response = await fetch('/.netlify/functions/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                });
+                
+                const data = await response.json();
+                const reply = data.reply;
+                
+                const jsonMatch = reply.match(/```json([\s\S]*?)```/);
+                if(jsonMatch) {
+                    addGraph(JSON.parse(jsonMatch[1]));
+                    const text = reply.replace(jsonMatch[0], '').trim();
+                    if(text) addMessage(text, true);
+                } else {
+                    addMessage(reply, true);
+                }
+            } catch(e) {
+                addMessage("Connection error. Cannot reach AI server.", true);
+            } finally {
+                input.disabled = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        input.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendMessage(); });
     </script>
 </body>
 </html>
