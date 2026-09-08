@@ -89,9 +89,15 @@
     </main>
 
     <!-- Floating AI Assistant Pop-up (Modal) -->
-    <button id="chat-fab" class="fixed bottom-6 right-6 p-4 bg-teal-600 text-white rounded-full shadow-lg hover:bg-teal-700 hover:scale-105 transition-all z-40">
-        <i class="ph ph-chat-centered-text text-3xl"></i>
-    </button>
+    <button id="chat-fab" class="fixed bottom-20 right-6 group flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300 z-40 cursor-pointer border border-teal-400/30">
+    <!-- Pulsing status ring -->
+    <span class="relative flex h-3 w-3">
+      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
+      <span class="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+    </span>
+    <i class="ph-bold ph-robot text-2xl group-hover:rotate-12 transition-transform"></i>
+    <span class="text-sm font-semibold tracking-wide pr-1 hidden sm:inline">Factory AI Analyst</span>
+</button>
 
     <div id="chat-modal-backdrop" class="fixed inset-0 bg-slate-900/60 z-50 p-4 md:p-10 flex items-center justify-center opacity-0 pointer-events-none transition-opacity">
         <div id="chat-modal-content" class="bg-white w-full max-w-2xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 opacity-0 transition-all">
