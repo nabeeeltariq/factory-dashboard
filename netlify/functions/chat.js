@@ -37,7 +37,7 @@ Rules:
 Data context: ${JSON.stringify(historyData)}`;
 
         // 4. Robust Retry with Timeout Protection
-        const modelsToTry = ["gemini-3.6-flash", "gemini-pro"];
+        const modelsToTry = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-pro"];
         let responseText = null;
         let lastError = null;
 
