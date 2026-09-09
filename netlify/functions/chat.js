@@ -27,7 +27,7 @@ Rules:
 - If the user asks for a graph or chart (e.g., "show me a bar chart of last 7 days production"), you MUST output a raw JSON block wrapped in \`\`\`json and \`\`\` markers containing a Chart.js configuration object.
 
 Data context: ${JSON.stringify(historyData)}`;
-        // 4. Generate the response
+      // 4. Generate the response
         const result = await model.generateContent([systemPrompt, message]);
         const responseText = result.response.text();
 
@@ -38,6 +38,13 @@ Data context: ${JSON.stringify(historyData)}`;
 
     } catch (error) {
         console.error("Function error:", error);
-        return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
+        
+        // If Google's servers are busy, send this friendly message back to the chat widget instead of crashing
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ 
+                reply: "My server is experiencing a brief moment of high traffic. Please wait a few seconds and ask me again!" 
+            })
+        };
     }
 };
