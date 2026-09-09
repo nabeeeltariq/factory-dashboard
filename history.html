@@ -88,9 +88,8 @@
         </div>
     </main>
 
-    <!-- Upgraded Interactive AI Floating Button (Positioned above Netlify badge) -->
+    <!-- Upgraded Interactive AI Floating Button -->
     <button id="chat-fab" class="fixed bottom-20 right-6 group flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300 z-40 cursor-pointer border border-teal-400/30">
-        <!-- Pulsing status ring -->
         <span class="relative flex h-3 w-3">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
           <span class="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
@@ -102,7 +101,6 @@
     <div id="chat-modal-backdrop" class="fixed inset-0 bg-slate-900/60 z-50 p-4 md:p-10 flex items-center justify-center opacity-0 pointer-events-none transition-opacity">
         <div id="chat-modal-content" class="bg-white w-full max-w-2xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 opacity-0 transition-all">
             
-            <!-- Header -->
             <header class="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
                 <div class="flex items-center gap-4">
                     <div class="p-2.5 bg-teal-100 text-teal-600 rounded-lg"><i class="ph-bold ph-robot text-2xl"></i></div>
@@ -116,7 +114,6 @@
                 <button id="close-chat" class="p-2 rounded-full hover:bg-slate-100 text-slate-400 transition"><i class="ph-bold ph-x text-2xl"></i></button>
             </header>
 
-            <!-- Chat History -->
             <div id="chat-history" class="flex-grow p-5 space-y-6 overflow-y-auto bg-slate-50/50">
                 <div class="flex items-start gap-4">
                     <div class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center mt-1"><i class="ph-bold ph-robot text-lg"></i></div>
@@ -126,7 +123,6 @@
                 </div>
             </div>
 
-            <!-- Input Area -->
             <footer class="p-4 bg-white border-t border-slate-100 sticky bottom-0">
                 <div class="flex items-center gap-3">
                     <input type="text" id="user-input" placeholder="Ask about shift data..." class="flex-grow px-5 py-3.5 bg-slate-100 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 transition">
@@ -177,7 +173,7 @@
                 const data = res.ok ? await res.json() : null;
 
                 if (!data) {
-                    pageBody.innerHTML = `<div class="text-center py-16 text-slate-400">No archived shifts yet. They'll show up here after you press Reset Shift.</div>`;
+                    pageBody.innerHTML = `<div class="text-center py-16 text-slate-400">No archived shifts yet.</div>`;
                     return;
                 }
 
@@ -202,13 +198,17 @@
 
                     const rowsHtml = month.entries.map(([key, record]) => {
                         const hasReport = !!record.report;
-                        
                         const shiftTons = (hasReport && record.report.total_tons) ? record.report.total_tons : 0;
                         monthlyTotalTons += shiftTons;
 
                         const badge = hasReport
                             ? `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100"><i class="ph-fill ph-check-circle"></i> Report Ready</span>`
                             : `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200"><i class="ph-bold ph-circle-dashed"></i> Not Generated</span>`;
+
+                        // Legacy / Automated UI Badge
+                        const sourceBadge = record.source === 'legacy_manual'
+                            ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 uppercase tracking-wider" title="Uploaded from Excel"><i class="ph-fill ph-archive"></i> Legacy</span>`
+                            : `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 uppercase tracking-wider" title="Recorded by ESP32"><i class="ph-fill ph-cpu"></i> Automated</span>`;
 
                         const shiftTonsDisplay = shiftTons > 0 
                             ? `<span class="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md font-bold text-xs"><i class="ph-fill ph-scales"></i> ${shiftTons.toFixed(2)} Tons</span>` 
@@ -218,7 +218,10 @@
                             <div class="history-entry-row w-full bg-white border border-slate-200 rounded-2xl p-5 mb-3 hover:border-slate-300 hover:shadow-md transition-all flex items-center gap-3">
                                 <button class="history-entry flex-1 text-left" data-key="${key}">
                                     <div class="flex items-center justify-between mb-2">
-                                        <span class="font-bold text-lg text-slate-800">${record.date || '--'}</span>
+                                        <div class="flex items-center gap-3">
+                                            <span class="font-bold text-lg text-slate-800">${record.date || '--'}</span>
+                                            ${sourceBadge}
+                                        </div>
                                         ${badge}
                                     </div>
                                     <div class="flex flex-wrap items-center gap-4 text-sm text-slate-500">
@@ -625,7 +628,6 @@
                 </div>
 
                 <div id="variant-split-section" class="hidden bg-white border border-slate-200 rounded-2xl shadow-sm p-6 mb-4">
-                    <!-- OEE Display Container inside Wizard -->
                     <div id="wizard-oee-display" class="flex items-center justify-between bg-brand-50 border border-brand-100 rounded-xl p-4 mb-6 flex-wrap gap-4">
                         <!-- Populated dynamically via JS -->
                     </div>
@@ -1098,7 +1100,6 @@
         closeBtn.addEventListener('click', () => toggleChat(false));
         backdrop.addEventListener('click', (e) => { if(e.target === backdrop) toggleChat(false); });
 
-        // --- 1. Updated Message Display (Cleans up asterisks & handles loading state) ---
         function addMessage(text, isBot) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex items-start gap-4 ${isBot ? '' : 'justify-end'}`;
@@ -1108,7 +1109,6 @@
 
             let contentHtml = text;
 
-            // Handle animated loading dots state
             if (text === '...loading...') {
                 contentHtml = `<div class="flex gap-2 p-2 items-center">
                                 <span class="text-xs text-slate-400 font-medium mr-1">Analysing factory data</span>
@@ -1117,12 +1117,11 @@
                                 <div class="w-2 h-2 bg-teal-600 rounded-full animate-bounce"></div>
                                </div>`;
             } else if (isBot) {
-                // Clean up raw asterisks and format bullet points/bold text cleanly
                 contentHtml = text
-                    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-950">$1</strong>') // Convert **bold**
-                    .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') // Convert *italic*
-                    .replace(/^\* /gm, '• ') // Convert bullet points to clean dots
-                    .replace(/\n/g, '<br>'); // Preserve line breaks
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-950">$1</strong>') 
+                    .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') 
+                    .replace(/^\* /gm, '• ') 
+                    .replace(/\n/g, '<br>'); 
             }
 
             wrapper.innerHTML = `
@@ -1131,7 +1130,7 @@
             `;
             historyDiv.appendChild(wrapper);
             historyDiv.scrollTop = historyDiv.scrollHeight;
-            return wrapper; // Return reference so we can remove it when loading finishes
+            return wrapper; 
         }
 
         function addGraph(config) {
@@ -1144,7 +1143,6 @@
             try { new Chart(document.getElementById(canvasId).getContext('2d'), config); } catch(e) { console.error(e); }
         }
 
-        // --- 2. Updated Communication Logic with Loading State ---
         async function sendMessage() {
             const msg = input.value.trim();
             if(!msg) return;
@@ -1154,10 +1152,8 @@
             sendBtn.disabled = true;
             sendBtn.textContent = 'Thinking...';
             
-            // Add user message
             addMessage(msg, false);
             
-            // Add temporary loading indicator bubble
             const loadingBubble = addMessage('...loading...', true);
             
             try {
@@ -1170,7 +1166,6 @@
                 const data = await response.json();
                 const reply = data.reply;
                 
-                // Remove loading indicator
                 historyDiv.removeChild(loadingBubble);
                 
                 const jsonMatch = reply.match(/```json([\s\S]*?)```/);
