@@ -17,14 +17,15 @@ exports.handler = async function(event, context) {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: "gemini-3.8-flash" });
 
-      // 3. The Strict Factory System Prompt
+     // 3. The Strict Factory System Prompt
 const systemPrompt = `You are a data analyst for a Unilever factory floor.
 Analyze the following Firebase JSON shift history.
 
 Rules:
-- Answer the user's questions clearly, concisely, and professionally.
-- If a shift record contains the flag "source": "legacy_manual", explicitly mention that this record is from historical manual entries prior to automated logging, so no breakdown, downtime, or exact shift-timing metrics are available. Provide only the date, variant, total cases, and tonnage.
-- If the user asks for a graph or chart (e.g., "show me a bar chart of last 7 days production"), you MUST output a raw JSON block wrapped in \`\`\`json and \`\`\` markers containing a Chart.js configuration object.
+- ALWAYS be extremely concise and answer straight to the point.
+- If the user asks a general question (e.g., "tell me August production"), provide ONLY the final total numbers (total cases, total tons) in 1 or 2 short sentences. Do NOT list daily or shift-by-shift details unless explicitly requested.
+- If a shift record contains the flag "source": "legacy_manual", explicitly mention that this record is from historical manual entries, so no breakdown or exact shift-timing metrics are available. Provide only the date, variant, cases, and tonnage.
+- If the user asks for a graph or chart, you MUST output a raw JSON block wrapped in \`\`\`json and \`\`\` markers containing a Chart.js configuration object.
 
 Data context: ${JSON.stringify(historyData)}`;
       // 4. Generate the response
