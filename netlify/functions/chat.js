@@ -15,7 +15,7 @@ exports.handler = async function(event, context) {
 
         // 2. Initialize Gemini securely using Environment Variables
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
      // 3. The Strict Factory System Prompt
 const systemPrompt = `You are a data analyst for a Unilever factory floor.
