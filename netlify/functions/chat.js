@@ -19,7 +19,25 @@ exports.handler = async function(event, context) {
         // 1. Fetch recent shift data from Firebase
         const firebaseURL = "https://automation-60207-default-rtdb.firebaseio.com/shift_history.json";
         const fbRes = await fetch(firebaseURL);
-        const historyData = await fbRes.json();
+        let historyData = await fbRes.json();
+
+        // --- NEW OPTIMIZATION: SMART PAYLOAD FILTER ---
+        if (historyData) {
+            let dataArray = Array.isArray(historyData) ? historyData : Object.values(historyData);
+            const lowerMessage = message.toLowerCase();
+            
+            // Check if the user asks for historical months, "year", or "all"
+            const askingForHistory = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "year", "all"]
+                .some(keyword => lowerMessage.includes(keyword));
+
+            if (!askingForHistory) {
+                // Keep only the latest 40 shifts for standard queries
+                dataArray = dataArray.slice(-40); 
+            }
+            
+            historyData = dataArray;
+        }
+        // --- END OF OPTIMIZATION ---
 
         // 2. Initialize Gemini securely
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
