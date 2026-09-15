@@ -39,22 +39,47 @@ exports.handler = async function(event, context) {
         }
         // --- END OF OPTIMIZATION ---
 
-        // 2. Initialize Gemini securely
+        // 2. Pre-calculate exact mathematical totals in JS
+        const minifiedData = historyData.map(s => {
+            const caseCount = Number(s.total_cases || s.cases || s.cases_produced || 0);
+            const tonCount = Number(s.tonnage || s.tons || (s.report && s.report.total_tons) || 0);
+
+            return {
+                date: s.date || s.shift_date,
+                cases: caseCount,
+                tons: tonCount,
+                source: s.source || "automated",
+                downtime: s.total_downtime_seconds || 0
+            };
+        });
+
+        const totals = minifiedData.reduce((acc, shift) => {
+            acc.cases += shift.cases;
+            acc.tons += shift.tons;
+            return acc;
+        }, { cases: 0, tons: 0 });
+
+        // 3. Initialize Gemini securely
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-        // 3. The Strict Factory System Prompt
+        // 4. The Strict Factory System Prompt (Merged with verified totals)
         const systemPrompt = `You are a data analyst for a Unilever factory floor.
-Analyze the following Firebase JSON shift history.
+
+VERIFIED CALCULATED TOTALS FOR THIS REQUESTED PERIOD:
+- Total Cases: ${totals.cases.toLocaleString()} cases
+- Total Tonnage: ${totals.tons.toFixed(2)} tons
+
+Shift Data Details: ${JSON.stringify(minifiedData)}
 
 Rules:
+- ALWAYS use the VERIFIED CALCULATED TOTALS provided above for any sum or summary questions.
+- Never attempt to manually calculate or add up the individual shift numbers yourself.
 - ALWAYS be extremely concise and answer straight to the point.
 - If the user asks a general question (e.g., "tell me August production"), provide ONLY the final total numbers (total cases, total tons) in 1 or 2 short sentences. Do NOT list daily or shift-by-shift details unless explicitly requested.
 - If a shift record contains the flag "source": "legacy_manual", explicitly mention that this record is from historical manual entries, so no breakdown or exact shift-timing metrics are available. Provide only the date, variant, cases, and tonnage.
-- If the user asks for a graph or chart, you MUST output a raw JSON block wrapped in \`\`\`json and \`\`\` markers containing a Chart.js configuration object.
+- If the user asks for a graph or chart, you MUST output a raw JSON block wrapped in \`\`\`json and \`\`\` markers containing a Chart.js configuration object.`;
 
-Data context: ${JSON.stringify(historyData)}`;
-
-        // 4. Robust Retry with Timeout Protection
+        // 5. Robust Retry with Timeout Protection
         const modelsToTry = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-pro"];
         let responseText = null;
         let lastError = null;
