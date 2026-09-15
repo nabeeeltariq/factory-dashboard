@@ -75,10 +75,16 @@
                 <p class="text-[10px] md:text-xs text-slate-500 font-medium mt-1">Archived shift records &amp; reports</p>
             </div>
         </div>
-        <a href="index.html" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
-            <i class="ph-bold ph-arrow-left text-base md:text-lg"></i>
-            <span class="text-sm md:text-base">Back to Dashboard</span>
-        </a>
+        <div class="flex items-center gap-3">
+            <button id="open-manual-modal-btn" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
+                <i class="ph-bold ph-plus text-base md:text-lg"></i>
+                <span class="text-sm md:text-base hidden sm:inline">Manual Shift</span>
+            </button>
+            <a href="index.html" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
+                <i class="ph-bold ph-arrow-left text-base md:text-lg"></i>
+                <span class="text-sm md:text-base hidden sm:inline">Back</span>
+            </a>
+        </div>
     </nav>
 
     <!-- Page Body -->
@@ -129,6 +135,49 @@
                     <button id="send-btn" class="px-6 py-3.5 bg-teal-600 text-white rounded-xl font-semibold hover:bg-teal-700 transition w-28 text-center">Send</button>
                 </div>
             </footer>
+        </div>
+    </div>
+
+    <!-- Manual Shift Entry Modal -->
+    <div id="manual-shift-backdrop" class="fixed inset-0 bg-slate-900/60 z-50 p-4 flex items-center justify-center opacity-0 pointer-events-none transition-opacity">
+        <div id="manual-shift-modal" class="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 opacity-0 transition-all">
+            <header class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2"><i class="ph-fill ph-archive text-amber-500"></i> Log Manual Shift</h2>
+                <button id="close-manual-modal-btn" class="p-1 rounded-md hover:bg-slate-200 text-slate-400 transition"><i class="ph-bold ph-x text-xl"></i></button>
+            </header>
+            <form id="manual-shift-form" class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Shift Date</label>
+                    <input type="date" id="manual-date" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Start Time</label>
+                        <input type="time" id="manual-start" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">End Time</label>
+                        <input type="time" id="manual-end" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Total Cases Produced</label>
+                    <input type="number" id="manual-cases" required min="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="e.g. 2450">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Downtime (Minutes)</label>
+                        <input type="number" id="manual-downtime" min="0" value="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Breakdown Count</label>
+                        <input type="number" id="manual-bd-count" min="0" value="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    </div>
+                </div>
+                <button type="submit" id="submit-manual-shift-btn" class="w-full mt-4 bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 rounded-xl transition-colors">
+                    Save Shift Record
+                </button>
+            </form>
         </div>
     </div>
 
@@ -1280,6 +1329,93 @@
 
         sendBtn.addEventListener('click', sendMessage);
         input.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendMessage(); });
+
+        // --- MANUAL SHIFT ENTRY LOGIC ---
+        const manualBackdrop = document.getElementById('manual-shift-backdrop');
+        const manualModal = document.getElementById('manual-shift-modal');
+        const openManualBtn = document.getElementById('open-manual-modal-btn');
+        const closeManualBtn = document.getElementById('close-manual-modal-btn');
+        const manualForm = document.getElementById('manual-shift-form');
+
+        function toggleManualModal(show) {
+            if(show) {
+                manualBackdrop.classList.remove('opacity-0', 'pointer-events-none');
+                manualModal.classList.remove('opacity-0', 'scale-95');
+            } else {
+                manualBackdrop.classList.add('opacity-0', 'pointer-events-none');
+                manualModal.classList.add('opacity-0', 'scale-95');
+                manualForm.reset();
+            }
+        }
+
+        openManualBtn.addEventListener('click', () => toggleManualModal(true));
+        closeManualBtn.addEventListener('click', () => toggleManualModal(false));
+        manualBackdrop.addEventListener('click', (e) => { if(e.target === manualBackdrop) toggleManualModal(false); });
+
+        manualForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submit-manual-shift-btn');
+            submitBtn.textContent = "Saving...";
+            submitBtn.disabled = true;
+
+            try {
+                // 1. Gather and format inputs
+                const dateVal = document.getElementById('manual-date').value; // YYYY-MM-DD
+                const dateParts = dateVal.split('-');
+                const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`; // DD-MM-YYYY
+
+                const startVal = document.getElementById('manual-start').value;
+                const endVal = document.getElementById('manual-end').value;
+                
+                // Convert Date + Time string to Unix milliseconds
+                const startMs = new Date(`${dateVal}T${startVal}:00`).getTime();
+                let endMs = new Date(`${dateVal}T${endVal}:00`).getTime();
+                
+                // Handle night shifts where end time is past midnight
+                if (endMs <= startMs) {
+                    endMs += (24 * 60 * 60 * 1000); // Add 1 day
+                }
+
+                const cases = parseInt(document.getElementById('manual-cases').value, 10);
+                const downtimeMins = parseInt(document.getElementById('manual-downtime').value, 10) || 0;
+                const bdCount = parseInt(document.getElementById('manual-bd-count').value, 10) || 0;
+
+                // 2. Build the exact object structure expected by the dashboard
+                const payload = {
+                    date: formattedDate,
+                    shift_start: startMs,
+                    shift_end: endMs,
+                    total_cases: cases,
+                    total_downtime_seconds: downtimeMins * 60,
+                    breakdown_count: bdCount,
+                    source: "legacy_manual",
+                    saved_at: Date.now()
+                };
+
+                // 3. Generate a random Firebase-style unique key (e.g., "-MnlXyz123")
+                const uniqueKey = "-Mnl" + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+                // 4. Push to Firebase
+                const res = await fetch(`${SHIFT_HISTORY_BASE}/${uniqueKey}.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) throw new Error("Failed to save manual shift");
+
+                // 5. Cleanup and refresh UI
+                toggleManualModal(false);
+                renderHistoryList();
+                
+            } catch (err) {
+                console.error("Manual shift save error:", err);
+                alert("Failed to save the manual shift. Please check your connection.");
+            } finally {
+                submitBtn.textContent = "Save Shift Record";
+                submitBtn.disabled = false;
+            }
+        });
     </script>
 </body>
 </html>
