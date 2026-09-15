@@ -575,6 +575,8 @@
                                     <div class="flex items-center gap-2 mt-0.5">
                                         <p class="text-slate-500">${formatDowntime(b.duration)}</p>
                                         ${b.duration > 60 ? `<button type="button" class="split-btn text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200 transition-colors flex items-center gap-1 shadow-sm" data-idx="${idx}"><i class="ph-bold ph-scissors"></i> Split</button>` : ''}
+                                        <button type="button" class="edit-duration-btn text-[10px] font-bold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition-colors flex items-center gap-1 shadow-sm" data-idx="${idx}"><i class="ph-bold ph-pencil-simple"></i> Edit</button>
+                                        <button type="button" class="delete-breakdown-btn text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 px-2 py-0.5 rounded border border-rose-200 transition-colors flex items-center gap-1 shadow-sm" data-idx="${idx}"><i class="ph-bold ph-trash"></i> Delete</button>
                                     </div>
                                 </div>
                                 <div class="flex gap-4 shrink-0">
@@ -712,6 +714,95 @@
                     } catch (err) {
                         console.error("Split error:", err);
                         alert("Failed to split the event. Please check your connection.");
+                    }
+                });
+            });
+
+            // --- NEW EDIT DURATION LOGIC ---
+            document.querySelectorAll('.edit-duration-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const idx = parseInt(btn.dataset.idx, 10);
+                    const b = record.breakdowns[idx];
+                    const currentMins = Math.round(b.duration / 60);
+                    
+                    const input = window.prompt(`Current duration is ${currentMins} minutes.\n\nEnter the NEW duration in total minutes:`, currentMins);
+                    if (!input) return; // User canceled
+                    
+                    const newMins = parseInt(input, 10);
+                    if (isNaN(newMins) || newMins < 0) {
+                        alert(`Please enter a valid number of minutes.`);
+                        return;
+                    }
+                    
+                    const newSecs = newMins * 60;
+                    const diffSecs = newSecs - b.duration; // Find the difference
+                    
+                    const newBreakdowns = [...record.breakdowns];
+                    newBreakdowns[idx].duration = newSecs;
+
+                    const currentTotalDowntime = record.total_downtime_seconds || 0;
+                    const newTotalDowntime = Math.max(0, currentTotalDowntime + diffSecs);
+                    
+                    try {
+                        // 1. Update individual breakdown in Firebase
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newBreakdowns)
+                        });
+
+                        // 2. Update master shift downtime to match the change
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/total_downtime_seconds.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newTotalDowntime)
+                        });
+                        
+                        record.breakdowns = newBreakdowns;
+                        record.total_downtime_seconds = newTotalDowntime;
+                        renderReportWizard(key, record); // Refresh UI
+                    } catch (err) {
+                        console.error("Edit error:", err);
+                        alert("Failed to edit the event duration. Please check your connection.");
+                    }
+                });
+            });
+
+            // --- NEW DELETE EVENT LOGIC ---
+            document.querySelectorAll('.delete-breakdown-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const idx = parseInt(btn.dataset.idx, 10);
+                    const b = record.breakdowns[idx];
+                    
+                    if (!window.confirm('Are you sure you want to permanently delete this stoppage event?')) return;
+                    
+                    const newBreakdowns = [...record.breakdowns];
+                    newBreakdowns.splice(idx, 1);
+
+                    const currentTotalDowntime = record.total_downtime_seconds || 0;
+                    const newTotalDowntime = Math.max(0, currentTotalDowntime - b.duration); // Deduct from total
+                    
+                    try {
+                        // 1. Update individual breakdown in Firebase
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newBreakdowns)
+                        });
+
+                        // 2. Update master shift downtime to match the deletion
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/total_downtime_seconds.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newTotalDowntime)
+                        });
+                        
+                        record.breakdowns = newBreakdowns;
+                        record.total_downtime_seconds = newTotalDowntime;
+                        renderReportWizard(key, record); // Refresh UI
+                    } catch (err) {
+                        console.error("Delete error:", err);
+                        alert("Failed to delete the event. Please check your connection.");
                     }
                 });
             });
