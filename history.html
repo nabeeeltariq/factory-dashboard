@@ -673,7 +673,7 @@
                         </div>
                     `;
                 }).join('')
-                : `<p class="text-sm text-slate-400 text-center py-6">No breakdowns recorded this shift — nothing to tag. The report will use a single variant for the whole shift.</p>`;
+                : `<p class="text-sm text-slate-400 text-center py-6">No breakdowns recorded this shift.</p>`;
 
             pageBody.innerHTML = `
                 <button id="back-to-detail" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 font-medium mb-4">
@@ -698,8 +698,14 @@
                     <label class="block text-sm font-medium text-slate-700 mb-2">Starting Variant</label>
                     ${startingVariantSelect}
 
-                    <h3 class="font-bold text-slate-800 text-sm mt-6 mb-1">Tag Each Stoppage</h3>
+                    <div class="flex items-center justify-between mt-6 mb-1">
+                        <h3 class="font-bold text-slate-800 text-sm">Tag Each Stoppage</h3>
+                        <button type="button" id="add-missing-breakdown-btn" class="text-[10px] font-bold text-indigo-700 hover:text-indigo-800 bg-indigo-100 hover:bg-indigo-200 px-2 py-1 rounded transition-colors uppercase tracking-wide shadow-sm flex items-center gap-1">
+                            <i class="ph-bold ph-plus"></i> Add Missing
+                        </button>
+                    </div>
                     <p class="text-xs text-slate-500 mb-3">Every stoppage defaults to "Breakdown." Mark it as "Changeover" or "Break Time" if it wasn't a real fault.</p>
+                    
                     <div id="breakdown-tag-list">${breakdownTagRows}</div>
 
                     <button id="calculate-split-btn" class="w-full mt-4 bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2">
@@ -755,6 +761,73 @@
                 });
             });
 
+            // --- NEW ADD MISSING BREAKDOWN LOGIC ---
+            const addMissingBtn = document.getElementById('add-missing-breakdown-btn');
+            if (addMissingBtn) {
+                addMissingBtn.addEventListener('click', async () => {
+                    const timeInput = window.prompt("Enter the START TIME of the missing stoppage (24-hour HH:MM format, e.g., 14:30 for 2:30 PM):");
+                    if (!timeInput) return;
+                    if (!/^([01]\d|2[0-3]):?([0-5]\d)$/.test(timeInput)) {
+                        alert("Invalid time format. Please use HH:MM (e.g., 14:30).");
+                        return;
+                    }
+
+                    const durationInput = window.prompt(`Start time set to ${timeInput}.\n\nEnter the DURATION of the stoppage in total MINUTES:`);
+                    if (!durationInput) return;
+                    
+                    const durationMins = parseInt(durationInput, 10);
+                    if (isNaN(durationMins) || durationMins <= 0) {
+                        alert("Please enter a valid number of minutes.");
+                        return;
+                    }
+
+                    const [hours, minutes] = timeInput.split(':').map(Number);
+                    const shiftStart = new Date(record.shift_start);
+                    let newBdDate = new Date(shiftStart);
+                    newBdDate.setHours(hours, minutes, 0, 0);
+                    let newBdMs = newBdDate.getTime();
+
+                    // Automatically handle night shifts cross-midnight
+                    if (record.shift_end && newBdMs < record.shift_start && (newBdMs + 86400000) <= record.shift_end) {
+                        newBdMs += 86400000;
+                    } else if (!record.shift_end && newBdMs < record.shift_start - 43200000) { 
+                        newBdMs += 86400000;
+                    }
+
+                    const newBreakdown = {
+                        start: newBdMs,
+                        duration: durationMins * 60
+                    };
+
+                    const newBreakdowns = [...(record.breakdowns || []), newBreakdown];
+                    newBreakdowns.sort((a, b) => a.start - b.start); 
+
+                    const currentTotalDowntime = record.total_downtime_seconds || 0;
+                    const newTotalDowntime = currentTotalDowntime + newBreakdown.duration;
+
+                    try {
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newBreakdowns)
+                        });
+
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/total_downtime_seconds.json`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newTotalDowntime)
+                        });
+                        
+                        record.breakdowns = newBreakdowns;
+                        record.total_downtime_seconds = newTotalDowntime;
+                        renderReportWizard(key, record); 
+                    } catch (err) {
+                        console.error("Add breakdown error:", err);
+                        alert("Failed to add the missing stoppage. Please check your connection.");
+                    }
+                });
+            }
+
             document.querySelectorAll('.split-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const idx = parseInt(btn.dataset.idx, 10);
@@ -780,12 +853,11 @@
                     );
                     
                     try {
-                        const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
+                        await fetch(`${SHIFT_HISTORY_BASE}/${key}/breakdowns.json`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(newBreakdowns)
                         });
-                        if (!res.ok) throw new Error('Split save failed');
                         
                         record.breakdowns = newBreakdowns;
                         renderReportWizard(key, record); 
