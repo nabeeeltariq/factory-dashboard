@@ -75,12 +75,24 @@
                 <p class="text-[10px] md:text-xs text-slate-500 font-medium mt-1">Archived shift records &amp; reports</p>
             </div>
         </div>
-        <div class="flex items-center gap-3">
-            <button id="open-manual-modal-btn" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
+        <div class="flex items-center gap-2 md:gap-3">
+            <!-- Hidden by default, shown for admins -->
+            <button id="open-manual-modal-btn" class="hidden px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-sm items-center gap-1.5 md:gap-2">
                 <i class="ph-bold ph-plus text-base md:text-lg"></i>
                 <span class="text-sm md:text-base hidden sm:inline">Manual Shift</span>
             </button>
-            <a href="index.html" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
+            
+            <!-- Login/Logout controls -->
+            <button id="btn-login" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2">
+                <i class="ph-bold ph-lock-key text-base md:text-lg"></i>
+                <span class="text-sm md:text-base hidden sm:inline">Login</span>
+            </button>
+            <button id="btn-logout" class="hidden px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors shadow-sm items-center gap-1.5 md:gap-2">
+                <i class="ph-bold ph-sign-out text-base md:text-lg"></i>
+                <span class="text-sm md:text-base hidden sm:inline">Logout</span>
+            </button>
+
+            <a href="index.html" class="px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-1.5 md:gap-2 ml-1">
                 <i class="ph-bold ph-arrow-left text-base md:text-lg"></i>
                 <span class="text-sm md:text-base hidden sm:inline">Back</span>
             </a>
@@ -138,7 +150,25 @@
         </div>
     </div>
 
-    <!-- Manual Shift Entry Modal with Dynamic Variants -->
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white/95 backdrop-blur-xl border border-slate-200/50 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h2 class="font-bold text-slate-800">Admin Login</h2>
+                <button id="close-login-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <label class="block text-sm font-medium text-slate-700 mb-2">Password</label>
+                <input type="password" id="admin-password" class="w-full border border-slate-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all" placeholder="Enter password">
+                <p id="login-error" class="text-xs text-rose-500 mt-2 hidden">Incorrect password.</p>
+                <button id="submit-login-btn" class="w-full mt-6 bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-lg transition-colors">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manual Shift Entry Modal -->
     <div id="manual-shift-backdrop" class="fixed inset-0 bg-slate-900/60 z-50 p-4 flex items-center justify-center opacity-0 pointer-events-none transition-opacity">
         <div id="manual-shift-modal" class="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 opacity-0 transition-all max-h-[90vh]">
             <header class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
@@ -162,7 +192,6 @@
                         </div>
                     </div>
                     
-                    <!-- DYNAMIC VARIANT LIST -->
                     <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
                         <div class="flex items-center justify-between mb-3">
                             <label class="block text-xs font-semibold text-slate-500 uppercase">Production by Variant</label>
@@ -170,9 +199,7 @@
                                 + Add Variant
                             </button>
                         </div>
-                        <div id="manual-variant-list" class="space-y-2 mb-3">
-                            <!-- Dynamic rows injected here -->
-                        </div>
+                        <div id="manual-variant-list" class="space-y-2 mb-3"></div>
                         <div class="flex justify-between items-center pt-3 border-t border-slate-200">
                             <span class="text-xs font-semibold text-slate-500 uppercase">Calculated Total:</span>
                             <span class="font-bold text-lg text-slate-900"><span id="manual-total-cases-display">0</span> <span class="text-sm font-medium text-slate-500">cases</span></span>
@@ -199,7 +226,9 @@
 
     <!-- MAIN HISTORY LOGIC -->
     <script>
-        // Global Error Catcher - If anything fails, it will print to the screen instead of being blank
+        // GLOBAL SECURITY STATE
+        let isAdmin = localStorage.getItem('factory_admin') === 'true';
+
         window.addEventListener('error', function(event) {
             const pb = document.getElementById('page-body');
             if(pb && pb.innerHTML === '') {
@@ -290,6 +319,10 @@
                             ? `<span class="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md font-bold text-xs"><i class="ph-fill ph-scales"></i> ${shiftTons.toFixed(2)} Tons</span>` 
                             : '';
 
+                        const deleteBtnHtml = isAdmin 
+                            ? `<button class="delete-entry-btn shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors" data-key="${key}" data-date="${record.date || 'this shift'}" title="Delete this shift"><i class="ph-bold ph-trash text-lg"></i></button>`
+                            : ``;
+
                         return `
                             <div class="history-entry-row w-full bg-white border border-slate-200 rounded-2xl p-5 mb-3 hover:border-slate-300 hover:shadow-md transition-all flex items-center gap-3">
                                 <button class="history-entry flex-1 text-left" data-key="${key}">
@@ -307,9 +340,7 @@
                                         ${shiftTonsDisplay}
                                     </div>
                                 </button>
-                                <button class="delete-entry-btn shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors" data-key="${key}" data-date="${record.date || 'this shift'}" title="Delete this shift">
-                                    <i class="ph-bold ph-trash text-lg"></i>
-                                </button>
+                                ${deleteBtnHtml}
                             </div>
                         `;
                     }).join('');
@@ -346,21 +377,23 @@
                     btn.addEventListener('click', () => renderHistoryDetail(btn.dataset.key, data[btn.dataset.key]));
                 });
 
-                document.querySelectorAll('.delete-entry-btn').forEach((btn) => {
-                    btn.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        const key = btn.dataset.key;
-                        if (!window.confirm(`Permanently delete the shift record for ${btn.dataset.date}? This cannot be undone.`)) return;
-                        try {
-                            const delRes = await fetch(`${SHIFT_HISTORY_BASE}/${key}.json`, { method: 'DELETE' });
-                            if (!delRes.ok) throw new Error('Delete failed');
-                            renderHistoryList();
-                        } catch (err) {
-                            console.error('Failed to delete shift:', err);
-                            alert('Failed to delete this shift. Please check your connection and try again.');
-                        }
+                if(isAdmin) {
+                    document.querySelectorAll('.delete-entry-btn').forEach((btn) => {
+                        btn.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            const key = btn.dataset.key;
+                            if (!window.confirm(`Permanently delete the shift record for ${btn.dataset.date}? This cannot be undone.`)) return;
+                            try {
+                                const delRes = await fetch(`${SHIFT_HISTORY_BASE}/${key}.json`, { method: 'DELETE' });
+                                if (!delRes.ok) throw new Error('Delete failed');
+                                renderHistoryList();
+                            } catch (err) {
+                                console.error('Failed to delete shift:', err);
+                                alert('Failed to delete this shift. Please check your connection and try again.');
+                            }
+                        });
                     });
-                });
+                }
             } catch (err) {
                 console.error('Failed to load shift history:', err);
                 pageBody.innerHTML = `<div class="text-center py-16 text-rose-500"><i class="ph-fill ph-warning-circle text-4xl mb-2"></i><br>Failed to load shift history.<br><span class="text-xs text-slate-400">${err.message}</span></div>`;
@@ -406,13 +439,16 @@
                     </tr>`).join('')
                 : `<tr><td colspan="3" class="py-6 text-center text-slate-400 text-sm">No breakdowns recorded.</td></tr>`;
 
-            const reportButtonHtml = record.report
-                ? `<button id="regenerate-report-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                       <i class="ph-fill ph-pencil-simple"></i> Edit Tagging / Regenerate
-                   </button>`
-                : `<button id="generate-report-btn" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                       <i class="ph-fill ph-file-plus"></i> Generate Report
-                   </button>`;
+            let reportButtonHtml = '';
+            if (isAdmin) {
+                reportButtonHtml = record.report
+                    ? `<button id="regenerate-report-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                           <i class="ph-fill ph-pencil-simple"></i> Edit Tagging / Regenerate
+                       </button>`
+                    : `<button id="generate-report-btn" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                           <i class="ph-fill ph-file-plus"></i> Generate Report
+                       </button>`;
+            }
 
             let reportContentHtml = '';
             if (record.report) {
@@ -465,7 +501,6 @@
                             </div>
                         </div>
 
-                        <!-- OEE Display Row -->
                         <div class="flex items-center justify-between bg-brand-50 border border-brand-100 rounded-xl p-4 mb-4 flex-wrap gap-4">
                             <div>
                                 <p class="text-xs text-brand-700 font-semibold uppercase tracking-wide">Shift OEE</p>
@@ -523,19 +558,23 @@
                 `;
             }
 
+            const casesHtml = isAdmin ? `
+                <div class="flex items-center justify-center gap-1.5 mt-1">
+                    <input type="number" id="edit-total-cases" value="${record.total_cases || 0}" class="w-20 text-xl font-bold text-slate-900 text-center bg-transparent border-b-2 border-transparent hover:border-slate-300 focus:border-brand-500 focus:outline-none transition-colors">
+                    <button id="save-total-cases-btn" class="hidden w-6 h-6 rounded-md bg-brand-600 hover:bg-brand-700 text-white items-center justify-center transition-colors" title="Save correction">
+                        <i class="ph-bold ph-check text-xs"></i>
+                    </button>
+                </div>` 
+                : `<p class="text-xl font-bold text-slate-900 mt-1">${(record.total_cases || 0).toLocaleString()}</p>`;
+
             const rawDataHtml = `
                 <div class="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
                     <h2 class="text-xl font-bold text-slate-900 mb-4">${record.date || 'Shift Details'}</h2>
 
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
                         <div class="bg-slate-50 rounded-xl p-3 text-center">
-                            <p class="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center justify-center gap-1">Total Cases <i class="ph-bold ph-pencil-simple text-slate-400"></i></p>
-                            <div class="flex items-center justify-center gap-1.5 mt-1">
-                                <input type="number" id="edit-total-cases" value="${record.total_cases || 0}" class="w-20 text-xl font-bold text-slate-900 text-center bg-transparent border-b-2 border-transparent hover:border-slate-300 focus:border-brand-500 focus:outline-none transition-colors">
-                                <button id="save-total-cases-btn" class="hidden w-6 h-6 rounded-md bg-brand-600 hover:bg-brand-700 text-white items-center justify-center transition-colors" title="Save correction">
-                                    <i class="ph-bold ph-check text-xs"></i>
-                                </button>
-                            </div>
+                            <p class="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center justify-center gap-1">Total Cases ${isAdmin ? '<i class="ph-bold ph-pencil-simple text-slate-400"></i>' : ''}</p>
+                            ${casesHtml}
                         </div>
                         <div class="bg-slate-50 rounded-xl p-3 text-center">
                             <p class="text-xs text-slate-500 font-medium uppercase tracking-wide">Downtime</p>
@@ -574,46 +613,48 @@
 
             document.getElementById('back-to-history-list').addEventListener('click', renderHistoryList);
 
-            const genBtn = document.getElementById('generate-report-btn') || document.getElementById('regenerate-report-btn');
-            if (genBtn) {
-                genBtn.addEventListener('click', () => renderReportWizard(key, record));
+            if (isAdmin) {
+                const genBtn = document.getElementById('generate-report-btn') || document.getElementById('regenerate-report-btn');
+                if (genBtn) {
+                    genBtn.addEventListener('click', () => renderReportWizard(key, record));
+                }
+
+                const editCasesInput = document.getElementById('edit-total-cases');
+                const saveCasesBtn = document.getElementById('save-total-cases-btn');
+                if(editCasesInput) {
+                    editCasesInput.addEventListener('input', () => {
+                        const changed = parseInt(editCasesInput.value, 10) !== (record.total_cases || 0);
+                        saveCasesBtn.classList.toggle('hidden', !changed);
+                        saveCasesBtn.classList.toggle('flex', changed);
+                    });
+                    saveCasesBtn.addEventListener('click', async () => {
+                        const newValue = parseInt(editCasesInput.value, 10);
+                        if (isNaN(newValue) || newValue < 0) {
+                            alert('Please enter a valid, non-negative number.');
+                            return;
+                        }
+                        try {
+                            const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/total_cases.json`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(newValue)
+                            });
+                            if (!res.ok) throw new Error('Save failed');
+                            record.total_cases = newValue;
+                            saveCasesBtn.classList.add('hidden');
+                            saveCasesBtn.classList.remove('flex');
+                            renderHistoryDetail(key, record);
+                        } catch (err) {
+                            console.error('Failed to save corrected total cases:', err);
+                            alert('Failed to save the correction. Please check your connection and try again.');
+                        }
+                    });
+                }
             }
 
             const downloadBtn = document.getElementById('download-existing-pdf-btn');
             if (downloadBtn) {
                 downloadBtn.addEventListener('click', () => generateShiftPDF(record, record.report));
-            }
-
-            const editCasesInput = document.getElementById('edit-total-cases');
-            const saveCasesBtn = document.getElementById('save-total-cases-btn');
-            if(editCasesInput) {
-                editCasesInput.addEventListener('input', () => {
-                    const changed = parseInt(editCasesInput.value, 10) !== (record.total_cases || 0);
-                    saveCasesBtn.classList.toggle('hidden', !changed);
-                    saveCasesBtn.classList.toggle('flex', changed);
-                });
-                saveCasesBtn.addEventListener('click', async () => {
-                    const newValue = parseInt(editCasesInput.value, 10);
-                    if (isNaN(newValue) || newValue < 0) {
-                        alert('Please enter a valid, non-negative number.');
-                        return;
-                    }
-                    try {
-                        const res = await fetch(`${SHIFT_HISTORY_BASE}/${key}/total_cases.json`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(newValue)
-                        });
-                        if (!res.ok) throw new Error('Save failed');
-                        record.total_cases = newValue;
-                        saveCasesBtn.classList.add('hidden');
-                        saveCasesBtn.classList.remove('flex');
-                        renderHistoryDetail(key, record);
-                    } catch (err) {
-                        console.error('Failed to save corrected total cases:', err);
-                        alert('Failed to save the correction. Please check your connection and try again.');
-                    }
-                });
             }
         }
 
@@ -761,7 +802,7 @@
                 });
             });
 
-            // --- NEW ADD MISSING BREAKDOWN LOGIC ---
+            // ALL OF THESE BUTTONS ARE ALREADY GATED BY ISADMIN BECAUSE THIS ENTIRE SCREEN IS HIDDEN OTHERWISE
             const addMissingBtn = document.getElementById('add-missing-breakdown-btn');
             if (addMissingBtn) {
                 addMissingBtn.addEventListener('click', async () => {
@@ -787,7 +828,6 @@
                     newBdDate.setHours(hours, minutes, 0, 0);
                     let newBdMs = newBdDate.getTime();
 
-                    // Automatically handle night shifts cross-midnight
                     if (record.shift_end && newBdMs < record.shift_start && (newBdMs + 86400000) <= record.shift_end) {
                         newBdMs += 86400000;
                     } else if (!record.shift_end && newBdMs < record.shift_start - 43200000) { 
@@ -1307,11 +1347,85 @@
             doc.save(`Shift_Report_${record.date || 'unknown'}.pdf`);
         }
 
+        // --- NEW GLOBAL ADMIN UI TOGGLE ---
+        function updateAdminUI() {
+            const loginBtn = document.getElementById('btn-login');
+            const logoutBtn = document.getElementById('btn-logout');
+            const manualBtn = document.getElementById('open-manual-modal-btn');
+            
+            if (isAdmin) {
+                loginBtn.classList.add('hidden');
+                loginBtn.classList.remove('flex');
+                logoutBtn.classList.remove('hidden');
+                logoutBtn.classList.add('flex');
+                manualBtn.classList.remove('hidden');
+                manualBtn.classList.add('flex');
+            } else {
+                loginBtn.classList.remove('hidden');
+                loginBtn.classList.add('flex');
+                logoutBtn.classList.add('hidden');
+                logoutBtn.classList.remove('flex');
+                manualBtn.classList.add('hidden');
+                manualBtn.classList.remove('flex');
+            }
+            
+            // Re-render the current view to automatically show/hide the correct admin tools
+            if (pageBody.innerHTML !== '') {
+                renderHistoryList();
+            }
+        }
+
         // Delay execution until DOM is fully loaded and safe
         document.addEventListener('DOMContentLoaded', () => {
             pageBody = document.getElementById('page-body');
             
-            renderHistoryList();
+            // Render the initial UI based on login status
+            updateAdminUI();
+
+            // --- LOGIN MODAL LOGIC ---
+            const loginBtn = document.getElementById('btn-login');
+            const logoutBtn = document.getElementById('btn-logout');
+            const loginModal = document.getElementById('login-modal');
+            const closeLoginBtn = document.getElementById('close-login-btn');
+            const submitLoginBtn = document.getElementById('submit-login-btn');
+            const adminPassword = document.getElementById('admin-password');
+            const loginError = document.getElementById('login-error');
+
+            loginBtn.addEventListener('click', () => {
+                loginModal.classList.remove('hidden');
+                loginModal.classList.add('flex');
+                adminPassword.value = '';
+                loginError.classList.add('hidden');
+                setTimeout(() => adminPassword.focus(), 100);
+            });
+
+            closeLoginBtn.addEventListener('click', () => {
+                loginModal.classList.add('hidden');
+                loginModal.classList.remove('flex');
+            });
+
+            const handleLogin = () => {
+                if (adminPassword.value === 'admin123') {
+                    isAdmin = true;
+                    localStorage.setItem('factory_admin', 'true');
+                    loginModal.classList.add('hidden');
+                    loginModal.classList.remove('flex');
+                    updateAdminUI();
+                } else {
+                    loginError.classList.remove('hidden');
+                }
+            };
+
+            submitLoginBtn.addEventListener('click', handleLogin);
+            adminPassword.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleLogin();
+            });
+
+            logoutBtn.addEventListener('click', () => {
+                isAdmin = false;
+                localStorage.removeItem('factory_admin');
+                updateAdminUI();
+            });
 
             // --- AI CHAT LOGIC ---
             const fab = document.getElementById('chat-fab');
@@ -1453,7 +1567,6 @@
                 const select = document.createElement('select');
                 select.className = 'manual-variant-name flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none';
                 
-                // Fallback in case VARIANTS isn't loaded yet
                 const optionsHTML = (typeof VARIANTS !== 'undefined') 
                     ? VARIANTS.map(v => `<option value="${v.name}">${v.name}</option>`).join('')
                     : `<option value="Unknown">Loading Variants...</option>`;
