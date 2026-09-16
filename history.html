@@ -1072,10 +1072,6 @@
                 </div>
             `;
 
-            document.getElementById('true-downtime-display').textContent = formatDowntime(report.true_downtime_seconds);
-            document.getElementById('changeover-time-display').textContent = formatDowntime(report.changeover_time_seconds);
-            document.getElementById('break-time-display').textContent = formatDowntime(report.break_time_seconds || 0);
-
             const updateLiveTons = () => {
                 let newTotalTons = 0;
                 document.querySelectorAll('.variant-total-input').forEach((input) => {
@@ -1091,9 +1087,40 @@
                 if (totalDisplay) totalDisplay.textContent = `${newTotalTons.toFixed(2)} Tons`;
             };
 
-            document.querySelectorAll('.variant-total-input').forEach(input => {
-                input.addEventListener('input', updateLiveTons);
+            // --- NEW AUTO-BALANCING LOGIC ---
+            const inputs = Array.from(document.querySelectorAll('.variant-total-input'));
+            const targetTotalCases = record.total_cases || 0;
+
+            inputs.forEach((activeInput, index) => {
+                activeInput.addEventListener('input', (e) => {
+                    if (inputs.length > 1) {
+                        let targetInputIndex = inputs.length - 1;
+                        if (index === targetInputIndex) {
+                            targetInputIndex = 0; 
+                        }
+                        
+                        const targetInput = inputs[targetInputIndex];
+                        
+                        let sumOthers = 0;
+                        inputs.forEach((inp, i) => {
+                            if (i !== targetInputIndex) {
+                                sumOthers += parseInt(inp.value, 10) || 0;
+                            }
+                        });
+
+                        let remainder = targetTotalCases - sumOthers;
+                        if (remainder < 0) remainder = 0; 
+                        
+                        targetInput.value = remainder;
+                    }
+                    
+                    updateLiveTons();
+                });
             });
+
+            document.getElementById('true-downtime-display').textContent = formatDowntime(report.true_downtime_seconds);
+            document.getElementById('changeover-time-display').textContent = formatDowntime(report.changeover_time_seconds);
+            document.getElementById('break-time-display').textContent = formatDowntime(report.break_time_seconds || 0);
         }
 
         function calculateVariantSplit(record) {
