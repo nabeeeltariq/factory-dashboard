@@ -17,9 +17,10 @@
     <!-- Shared Firebase endpoint config (also used by index.html) -->
     <script src="firebase-config.js"></script>
 
-    <!-- PDF generation -->
+    <!-- PDF generation & Screenshot Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
     <!-- Tailwind Config for Custom Colors -->
     <script>
@@ -268,6 +269,66 @@
 
         let pageBody;
 
+        // --- NEW HIGH RESOLUTION SCREENSHOT SCRIPT ---
+        async function captureAndShareReport() {
+          const reportElement = document.getElementById('reportCard');
+
+          if (!reportElement) {
+            console.error("Report card element not found.");
+            return;
+          }
+
+          const shareBtn = document.getElementById('share-whatsapp-btn');
+          const originalBtnText = shareBtn.innerHTML;
+          shareBtn.innerHTML = '<i class="ph-bold ph-spinner animate-spin"></i> Processing...';
+
+          try {
+            await document.fonts.ready;
+
+            const canvas = await html2canvas(reportElement, {
+              scale: 3,                          // 3x resolution for sharp text
+              useCORS: true,                     
+              backgroundColor: '#ffffff',        
+              logging: false,
+              scrollY: -window.scrollY,          
+              scrollX: -window.scrollX,
+              windowWidth: document.documentElement.offsetWidth,
+              height: reportElement.scrollHeight 
+            });
+
+            canvas.toBlob(async (blob) => {
+              if (!blob) {
+                alert("Failed to process image.");
+                shareBtn.innerHTML = originalBtnText;
+                return;
+              }
+
+              const file = new File([blob], `Shift_Report_${Date.now()}.png`, { type: 'image/png' });
+
+              if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                  title: 'Shift Production Report',
+                  text: 'Shift performance report attached.',
+                  files: [file]
+                });
+              } else {
+                const downloadLink = document.createElement('a');
+                downloadLink.download = `Shift_Report_${Date.now()}.png`;
+                downloadLink.href = URL.createObjectURL(blob);
+                downloadLink.click();
+                URL.revokeObjectURL(downloadLink.href);
+                alert("High-quality screenshot downloaded! You can now drag it directly into WhatsApp Web.");
+              }
+              shareBtn.innerHTML = originalBtnText;
+            }, 'image/png', 1.0);
+
+          } catch (error) {
+            console.error("Error generating report snapshot:", error);
+            alert("Could not capture screenshot. Check browser console.");
+            shareBtn.innerHTML = originalBtnText;
+          }
+        }
+
         async function renderHistoryList() {
             if (!pageBody) return;
             pageBody.innerHTML = `<div class="text-center py-16 text-slate-400">Loading...</div>`;
@@ -493,7 +554,7 @@
                     : `<tr><td colspan="2" class="py-4 text-center text-slate-400 text-sm">No break time tagged.</td></tr>`;
 
                 reportContentHtml = `
-                    <div class="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
+                    <div id="reportCard" class="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
                         <div class="flex items-center justify-between mb-4">
                             <div class="flex items-center gap-2">
                                 <i class="ph-fill ph-check-circle text-emerald-600 text-lg"></i>
@@ -551,9 +612,14 @@
                         <table class="w-full"><tbody>${breakRowsHtml}</tbody></table>
                     </div>
 
-                    <button id="download-existing-pdf-btn" class="w-full mb-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                        <i class="ph-fill ph-download-simple"></i> Download PDF
-                    </button>
+                    <div class="flex gap-3 mb-3">
+                        <button id="download-existing-pdf-btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                            <i class="ph-fill ph-download-simple"></i> PDF
+                        </button>
+                        <button id="share-whatsapp-btn" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                            <i class="ph-bold ph-share-network"></i> Share
+                        </button>
+                    </div>
                     <div class="mb-6">${reportButtonHtml}</div>
                 `;
             }
@@ -652,9 +718,16 @@
                 }
             }
 
+            // PDF Download Action
             const downloadBtn = document.getElementById('download-existing-pdf-btn');
             if (downloadBtn) {
                 downloadBtn.addEventListener('click', () => generateShiftPDF(record, record.report));
+            }
+
+            // NEW: WhatsApp Share Action
+            const shareBtn = document.getElementById('share-whatsapp-btn');
+            if (shareBtn) {
+                shareBtn.addEventListener('click', captureAndShareReport);
             }
         }
 
@@ -779,7 +852,7 @@
                     </div>
 
                     <button id="save-report-btn" class="w-full mt-6 bg-brand-600 hover:bg-brand-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                        <i class="ph-fill ph-floppy-disk"></i> Save Report &amp; Download PDF
+                        <i class="ph-fill ph-floppy-disk"></i> Save Report
                     </button>
                 </div>
             `;
@@ -1031,8 +1104,6 @@
                     if (!res.ok) throw new Error('Save failed');
 
                     record.report = currentReportDraft;
-                    generateShiftPDF(record, currentReportDraft);
-                    alert('Report saved. PDF download should start automatically.');
                     renderHistoryDetail(key, record);
                 } catch (err) {
                     console.error('Failed to save report:', err);
