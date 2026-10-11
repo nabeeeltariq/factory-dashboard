@@ -50,7 +50,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
     }
 }
 
-// Cleans unsupported markdown (### headers, - bullets) so history.html renders it neatly
 function formatForChatUI(replyText) {
     if (!replyText || typeof replyText !== "string") return "";
 
@@ -64,18 +63,18 @@ function formatForChatUI(replyText) {
         }
     }
 
-    // Convert ### Headers into **Bold Titles** and "- " bullets into "• "
     return text
         .replace(/^#{1,4}\s+(.*)$/gm, "**$1**")
         .replace(/^- /gm, "• ");
 }
 
-// Instant Native JS Chart.js Builder
+// Instant Native JS Chart.js Builder (Supports Brand Split, Variant Split, Monthly, and Daily Charts)
 function buildNativeChartReply(lowerMsg, filterLabel, stats, filteredShifts, globalMonthly) {
     const wantsTons = /\b(ton|tons|tonnage)\b/i.test(lowerMsg) && !/\b(case|cases)\b/i.test(lowerMsg);
     const wantsDowntime = /\b(downtime|breakdown|stoppage)\b/i.test(lowerMsg);
     const wantsOee = /\b(oee|efficiency)\b/i.test(lowerMsg);
-    const isPie = /\b(pie|doughnut|donut)\b/i.test(lowerMsg);
+    const wantsBrand = /\b(brand|lux vs|lifebuoy)\b/i.test(lowerMsg) && !/\b(all variant|each variant)\b/i.test(lowerMsg);
+    const isPie = /\b(pie|doughnut|donut|split)\b/i.test(lowerMsg);
     const isLine = /\b(line|trend)\b/i.test(lowerMsg);
 
     const palette = [
@@ -89,7 +88,17 @@ function buildNativeChartReply(lowerMsg, filterLabel, stats, filteredShifts, glo
     let datasetLabel = "";
     let chartTitle = "";
 
-    if (/(variant|sku|product|across all|what we produced)/i.test(lowerMsg) && Object.keys(stats.variants).length > 0) {
+    // 1. Brand Split Chart (LUX vs Lifebuoy)
+    if (wantsBrand && Object.keys(stats.brands).length > 0) {
+        const sortedBrands = Object.entries(stats.brands)
+            .sort((a, b) => (wantsTons ? b[1].tons - a[1].tons : b[1].cases - a[1].cases));
+        labels = sortedBrands.map(([b]) => b);
+        dataValues = sortedBrands.map(([, d]) => wantsTons ? d.tons : d.cases);
+        datasetLabel = wantsTons ? "Tons Produced" : "Cases Produced";
+        chartTitle = `${filterLabel} — Brand Split (${wantsTons ? "Tons" : "Cases"})`;
+    }
+    // 2. Variant Breakdown Chart
+    else if (/(variant|sku|product|across all|what we produced)/i.test(lowerMsg) && Object.keys(stats.variants).length > 0) {
         const sortedVariants = Object.entries(stats.variants)
             .sort((a, b) => (wantsTons ? b[1].tons - a[1].tons : b[1].cases - a[1].cases));
 
@@ -97,13 +106,17 @@ function buildNativeChartReply(lowerMsg, filterLabel, stats, filteredShifts, glo
         dataValues = sortedVariants.map(([, d]) => wantsTons ? d.tons : d.cases);
         datasetLabel = wantsTons ? "Tons Produced" : "Cases Produced";
         chartTitle = `${filterLabel} — Production by Variant (${wantsTons ? "Tons" : "Cases"})`;
-    } else if (/\b(monthly|by month|each month|months)\b/i.test(lowerMsg)) {
+    }
+    // 3. Monthly Rollup Chart
+    else if (/\b(monthly|by month|each month|months)\b/i.test(lowerMsg)) {
         const monthEntries = Object.entries(globalMonthly);
         labels = monthEntries.map(([m]) => m);
         dataValues = monthEntries.map(([, d]) => wantsTons ? d.tons : d.cases);
         datasetLabel = wantsTons ? "Monthly Tons" : "Monthly Cases";
         chartTitle = `Monthly Production (${wantsTons ? "Tons" : "Cases"})`;
-    } else {
+    }
+    // 4. Shift-by-Shift Chart
+    else {
         const slice = filteredShifts.slice(-30);
         labels = slice.map(s => s.date);
         if (wantsDowntime) {
@@ -171,14 +184,23 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
         return `⚠️ No production shift records were found for **${filterLabel}**.`;
     }
 
+    const asksBrandSplit = /\b(lux|lifebuoy|brand)\b/i.test(lowerMsg) && /\b(split|vs|compare|production|total|cases|tons)\b/i.test(lowerMsg);
     const asksDowntime = /(breakdown|downtime|stoppage|stopped|fault|changeover)/i.test(lowerMsg);
-    const asksTonsOnly = /(ton|tonnage|weight)/i.test(lowerMsg) && !/(case|variant|sku|what we produced|breakdown)/i.test(lowerMsg);
-    const asksCasesOnly = /\b(case|cases|boxes)\b/i.test(lowerMsg) && !/(ton|variant|sku|what we produced|breakdown)/i.test(lowerMsg);
+    const asksTonsOnly = /(ton|tonnage|weight)/i.test(lowerMsg) && !/(case|variant|sku|what we produced|breakdown|lux|lifebuoy)/i.test(lowerMsg);
+    const asksCasesOnly = /\b(case|cases|boxes)\b/i.test(lowerMsg) && !/(ton|variant|sku|what we produced|breakdown|lux|lifebuoy)/i.test(lowerMsg);
     const asksOeeOnly = /\b(oee|efficiency|target)\b/i.test(lowerMsg);
 
     const legacyNote = stats.legacy_count > 0
         ? `\n\n*ℹ️ Includes ${stats.legacy_count} legacy manual record${stats.legacy_count > 1 ? "s" : ""} (no automated breakdown timing).*`
         : "";
+
+    if (asksBrandSplit && Object.keys(stats.brands).length > 0) {
+        const brandBullets = Object.entries(stats.brands)
+            .sort((a, b) => b[1].cases - a[1].cases)
+            .map(([bName, d]) => `• **${bName}:** **${d.cases.toLocaleString()} cases** (**${d.tons.toFixed(2)} tons** — ${d.share_pct}%)`)
+            .join("\n");
+        return `📊 **Brand Split — ${filterLabel} (${stats.shift_count} Shifts)**\n${brandBullets}\n• **Combined Total:** ${stats.total_cases.toLocaleString()} cases (${stats.total_tons.toFixed(2)} tons)`;
+    }
 
     if (asksDowntime) {
         if (stats.legacy_count === stats.shift_count) {
@@ -201,12 +223,17 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
             : `ℹ️ No OEE percentage was calculated for **${filterLabel}**.`;
     }
 
+    const brandSummary = Object.entries(stats.brands)
+        .sort((a, b) => b[1].cases - a[1].cases)
+        .map(([bName, d]) => `• **${bName} Total:** ${d.cases.toLocaleString()} cases *(${d.tons.toFixed(2)} t — ${d.share_pct}%)*`)
+        .join("\n");
+
     const variantBullets = Object.entries(stats.variants)
         .sort((a, b) => b[1].cases - a[1].cases)
         .map(([v, d]) => `• **${v}:** ${d.cases.toLocaleString()} cases *(${d.tons.toFixed(2)} t)*`)
         .join("\n");
 
-    return `📊 **${filterLabel} — Production Summary**\n• **Total Output:** **${stats.total_cases.toLocaleString()} cases** (**${stats.total_tons.toFixed(2)} tons**)\n• **Shifts Logged:** ${stats.shift_count} shift${stats.shift_count > 1 ? "s" : ""}${stats.avg_oee ? ` | **Avg OEE:** **${stats.avg_oee}%**` : ""}\n• **True Downtime:** ${stats.total_downtime_mins} mins${variantBullets ? `\n\n📦 **Breakdown by Variant:**\n${variantBullets}` : ""}${legacyNote}`;
+    return `📊 **${filterLabel} — Production Summary**\n• **Total Output:** **${stats.total_cases.toLocaleString()} cases** (**${stats.total_tons.toFixed(2)} tons**)\n• **Shifts Logged:** ${stats.shift_count} shift${stats.shift_count > 1 ? "s" : ""}${stats.avg_oee ? ` | **Avg OEE:** **${stats.avg_oee}%**` : ""}\n• **True Downtime:** ${stats.total_downtime_mins} mins${brandSummary ? `\n\n🏷️ **Split by Brand:**\n${brandSummary}` : ""}${variantBullets ? `\n\n📦 **Breakdown by Variant:**\n${variantBullets}` : ""}${legacyNote}`;
 }
 
 exports.handler = async function(event, context) {
@@ -249,7 +276,7 @@ exports.handler = async function(event, context) {
                 statusCode: 200,
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    reply: `👋 **Hello! I'm your Factory AI Analyst.**\n\n🟢 **Live Line Status:** **${liveStatusStr}** (${liveCasesNow.toLocaleString()} cases)\n\n💡 **Try asking me:**\n• *"Make a graph of variants in September"*\n• *"How many total tons till now?"*\n• *"What we produced on 30 September?"*\n• *"Breakdown time in August"*`
+                    reply: `👋 **Hello! I'm your Factory AI Analyst.**\n\n🟢 **Live Line Status:** **${liveStatusStr}** (${liveCasesNow.toLocaleString()} cases)\n\n💡 **Try asking me:**\n• *"Tell me production split in LUX and Lifebuoy"*\n• *"Make a graph of variants in September"*\n• *"How many total tons till now?"*\n• *"What we produced on 30 September?"*`
                 })
             };
         }
@@ -292,7 +319,7 @@ exports.handler = async function(event, context) {
                 };
             });
 
-        // 4. SMART JS FILTER: Specific Date, Month, Year, or "Till Now / Overall"
+        // 4. SMART JS FILTER: Specific Date, Month, Year, or Default to ALL Recorded History
         let matchedMonths = [];
         let requestedDay = null;
         let requestedYear = null;
@@ -340,6 +367,7 @@ exports.handler = async function(event, context) {
             matchedMonths = [(currentMonth + 11) % 12];
         }
 
+        // DEFAULT TO ALL RECORDED SHIFTS unless a specific date/month/recent slice is requested
         let filteredShifts = allShifts;
         let filterLabel = "All Recorded History";
         let targetYear = requestedYear;
@@ -348,8 +376,6 @@ exports.handler = async function(event, context) {
             filteredShifts = filteredShifts.filter(s => s.year === requestedYear);
             filterLabel = `Year ${requestedYear}`;
         }
-
-        const asksAllTime = /(till now|til now|so far|till date|to date|overall|all time|all shift|history|total ton|total case|total production|ever)/i.test(lowerMsg);
 
         if (matchedMonths.length > 0) {
             if (!targetYear) {
@@ -369,22 +395,23 @@ exports.handler = async function(event, context) {
             } else {
                 filterLabel = `${matchedMonths.map(m => MONTH_NAMES[m]).join(", ")}${targetYear ? " " + targetYear : ""}`;
             }
+        } else if (lowerMsg.includes("last 30") || lowerMsg.includes("recent 30")) {
+            filteredShifts = allShifts.slice(-30);
+            filterLabel = "Latest 30 Shifts";
         } else if (lowerMsg.includes("last 7") || lowerMsg.includes("last week") || lowerMsg.includes("past week")) {
             filteredShifts = allShifts.slice(-7);
             filterLabel = "Last 7 Shifts";
         } else if (lowerMsg.includes("last shift") || lowerMsg.includes("latest shift") || lowerMsg.includes("yesterday")) {
             filteredShifts = allShifts.slice(-1);
             filterLabel = "Latest Shift";
-        } else if (!requestedYear && !asksAllTime) {
-            filteredShifts = allShifts.slice(-30);
-            filterLabel = "Latest 30 Shifts";
         }
 
-        // 5. Exact JS Mathematical Aggregator
+        // 5. Exact JS Mathematical Aggregator (Includes Pre-Calculated Brand Split: LUX vs Lifebuoy)
         function aggregateShifts(shiftsArray) {
             let totalCases = 0, totalTons = 0, totalDowntimeMins = 0, totalChangeoverMins = 0, totalBreakdowns = 0;
             let oeeSum = 0, oeeCount = 0, legacyCount = 0;
             const byVariant = {};
+            const byBrand = {};
             const byMonth = {};
 
             shiftsArray.forEach(s => {
@@ -400,9 +427,19 @@ exports.handler = async function(event, context) {
                 }
 
                 Object.entries(s.variant_totals || {}).forEach(([vName, vCases]) => {
+                    const c = Number(vCases || 0);
+                    const t = Number((s.variant_tons && s.variant_tons[vName]) || 0);
+
                     if (!byVariant[vName]) byVariant[vName] = { cases: 0, tons: 0 };
-                    byVariant[vName].cases += Number(vCases || 0);
-                    byVariant[vName].tons = Number((byVariant[vName].tons + Number((s.variant_tons && s.variant_tons[vName]) || 0)).toFixed(2));
+                    byVariant[vName].cases += c;
+                    byVariant[vName].tons = Number((byVariant[vName].tons + t).toFixed(2));
+
+                    // Group by Brand (LUX, Lifebuoy, or Other) in JS so AI never has to add variants
+                    const upperV = vName.toUpperCase();
+                    const brandName = upperV.includes("LUX") ? "LUX" : (upperV.includes("LIFEBUOY") ? "Lifebuoy" : "Other");
+                    if (!byBrand[brandName]) byBrand[brandName] = { cases: 0, tons: 0, share_pct: 0 };
+                    byBrand[brandName].cases += c;
+                    byBrand[brandName].tons = Number((byBrand[brandName].tons + t).toFixed(2));
                 });
 
                 const mKey = (s.year && s.month !== null) ? `${MONTH_NAMES[s.month]} ${s.year}` : "Unknown";
@@ -411,6 +448,11 @@ exports.handler = async function(event, context) {
                 byMonth[mKey].cases += s.cases;
                 byMonth[mKey].tons = Number((byMonth[mKey].tons + s.tons).toFixed(2));
                 if (s.source === "legacy_manual") byMonth[mKey].legacy_shifts += 1;
+            });
+
+            // Calculate exact brand share percentage
+            Object.keys(byBrand).forEach(b => {
+                byBrand[b].share_pct = totalCases > 0 ? Number(((byBrand[b].cases / totalCases) * 100).toFixed(1)) : 0;
             });
 
             return {
@@ -423,6 +465,7 @@ exports.handler = async function(event, context) {
                 total_downtime_mins: totalDowntimeMins,
                 total_changeover_mins: totalChangeoverMins,
                 total_breakdowns: totalBreakdowns,
+                brands: byBrand,
                 variants: byVariant,
                 monthly_rollup: byMonth
             };
@@ -453,8 +496,8 @@ exports.handler = async function(event, context) {
             };
         }
 
-        // 7. System Prompt with Clean Visual Formatting Rules
-        const compactRows = filteredShifts.slice(-30).map(s => ({
+        // 7. System Prompt with Pre-Calculated Brand Split & Clean Visual Formatting Rules
+        const compactRows = filteredShifts.slice(-25).map(s => ({
             date: s.date,
             cases: s.cases,
             tons: Number(s.tons.toFixed(2)),
@@ -469,31 +512,30 @@ exports.handler = async function(event, context) {
 LIVE ACTIVE SHIFT RIGHT NOW:
 Status: ${liveStatusStr}, Live Cases: ${liveCasesNow.toLocaleString()}, Breakdown: ${Math.round(Number((liveData && liveData.breakdown_seconds) || 0) / 60)} mins.
 
-VERIFIED JS-CALCULATED TOTALS FOR "${filterLabel}":
+VERIFIED JS-CALCULATED TOTALS FOR "${filterLabel}" (${stats.shift_count} Shifts):
 - Matched Shifts: ${stats.shift_count} (${stats.automated_count} automated, ${stats.legacy_count} legacy_manual)
 - Total Cases Produced: ${stats.total_cases.toLocaleString()} cases
 - Total Tonnage: ${stats.total_tons.toFixed(2)} tons
 - Average OEE: ${stats.avg_oee !== null ? stats.avg_oee + "%" : "N/A"}
 - Total True Downtime: ${stats.total_downtime_mins} mins (${(stats.total_downtime_mins / 60).toFixed(1)} hrs) across ${stats.total_breakdowns} breakdowns
 - Total Changeover Time: ${stats.total_changeover_mins} mins
-- Production by Variant: ${JSON.stringify(stats.variants)}
+- PRE-CALCULATED BRAND SPLIT (LUX vs Lifebuoy): ${JSON.stringify(stats.brands)}
+- Production by Individual Variant: ${JSON.stringify(stats.variants)}
 
 ALL-TIME MONTHLY ROLLUP:
 ${JSON.stringify(globalMonthly)}
 
-SHIFT RECORDS FOR "${filterLabel}":
+RECENT SHIFT SAMPLE FOR "${filterLabel}":
 ${JSON.stringify(compactRows)}
 
-STRICT VISUAL FORMATTING RULES (CRITICAL):
-1. ALWAYS use the VERIFIED JS-CALCULATED TOTALS above. Never manually add numbers yourself.
-2. Format your response like a clean, easy-to-read executive card:
-   - Start with a bold title line and a relevant emoji (e.g., 📊 **September 2026 Summary** or ⚖️ **Total Tonnage**).
-   - Put each key metric or variant on its own separate line starting with "• " and bold the label/numbers (e.g., • **Total Output:** 13,415 cases (**113.36 tons**)).
-   - NEVER write long comma-separated lists of variants or shifts in a single paragraph. Always put each item on a new bulleted line.
-   - NEVER use ### headings or Markdown |---| tables (the chat window only supports **bold**, *italics*, "• " bullets, and line breaks).
-3. Answer ONLY what the user asked:
-   - If they ask for "total tons", show only the tonnage and case/shift count in 2 clean bullet points.
-   - If they ask "what we produced", show the top summary bullets followed by a clean vertical bulleted list of variants.`;
+STRICT VISUAL FORMATTING & MATH RULES (CRITICAL):
+1. ALWAYS use the VERIFIED JS-CALCULATED TOTALS and PRE-CALCULATED BRAND SPLIT above. NEVER manually add variant numbers yourself.
+2. Always include the timeframe ("${filterLabel}" and "${stats.shift_count} shifts") in your bold header so the user knows the exact scope.
+3. Format your response like a clean executive card:
+   - Start with a bold title line and a relevant emoji (e.g., 📊 **Production Split — LUX vs. Lifebuoy (${filterLabel}, ${stats.shift_count} Shifts)**).
+   - Put each key metric, brand, or variant on its own separate line starting with "• " and bold the label/numbers.
+   - NEVER use ### headings or Markdown |---| tables.
+4. Answer ONLY what the user asked concisely.`;
 
         let replyText = "";
 
