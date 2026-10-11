@@ -1,5 +1,3 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-
 const MONTHS = {
     jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
     apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
@@ -9,19 +7,17 @@ const MONTHS = {
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-// Matches the exact date resolution used in history.html and archive-shift.js (DD-MM-YYYY + shift_start)
+// Matches exact date resolution used in history.html and archive-shift.js (DD-MM-YYYY + shift_start)
 function resolveShiftDate(record) {
-    if (record.shift_start) {
-        const d = new Date(Number(record.shift_start));
-        if (!isNaN(d.getTime())) return d;
-    }
     if (record.date) {
         const parts = String(record.date).trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
         if (parts) {
             return new Date(Number(parts[3]), Number(parts[2]) - 1, Number(parts[1]));
         }
-        const parsed = new Date(record.date);
-        if (!isNaN(parsed.getTime())) return parsed;
+    }
+    if (record.shift_start) {
+        const d = new Date(Number(record.shift_start));
+        if (!isNaN(d.getTime())) return d;
     }
     if (record.saved_at) {
         const d = new Date(Number(record.saved_at));
@@ -30,7 +26,6 @@ function resolveShiftDate(record) {
     return null;
 }
 
-// Strict timeout wrapper so Netlify never hits the 10s free-tier kill switch
 async function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -41,7 +36,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
     }
 }
 
-// Validates Chart.js JSON blocks so history.html never crashes on JSON.parse()
 function sanitizeChartReply(replyText) {
     if (!replyText || typeof replyText !== "string") return "";
     const jsonMatch = replyText.match(/```json([\s\S]*?)```/);
@@ -51,7 +45,6 @@ function sanitizeChartReply(replyText) {
         JSON.parse(jsonMatch[1].trim());
         return replyText.trim();
     } catch (e) {
-        // If AI wrote malformed JSON, strip the broken block so text still renders cleanly
         return replyText.replace(jsonMatch[0], "").trim();
     }
 }
@@ -66,9 +59,9 @@ exports.handler = async function(event, context) {
             return { statusCode: 200, body: JSON.stringify({ reply: "Please enter a question about your factory data." }) };
         }
 
-        const lowerMsg = message.toLowerCase();
+        const lowerMsg = message.toLowerCase().trim();
 
-        // 1. Fetch shift_history, live shift_data, and shift_adjustments in parallel
+        // 1. Fetch Firebase nodes in parallel
         const HISTORY_URL = "https://automation-60207-default-rtdb.firebaseio.com/shift_history.json";
         const LIVE_URL = "https://automation-60207-default-rtdb.firebaseio.com/shift_data.json";
         const ADJ_URL = "https://automation-60207-default-rtdb.firebaseio.com/shift_adjustments.json";
@@ -79,25 +72,29 @@ exports.handler = async function(event, context) {
             fetchWithTimeout(ADJ_URL, {}, 2500)
         ]);
 
-        const rawHistory = (historyRes.status === "fulfilled" && historyRes.value.ok)
-            ? await historyRes.value.json()
-            : null;
-        const liveData = (liveRes.status === "fulfilled" && liveRes.value.ok)
-            ? await liveRes.value.json()
-            : null;
-        const adjData = (adjRes.status === "fulfilled" && adjRes.value.ok)
-            ? await adjRes.value.json()
-            : null;
+        const rawHistory = (historyRes.status === "fulfilled" && historyRes.value.ok) ? await historyRes.value.json() : null;
+        const liveData = (liveRes.status === "fulfilled" && liveRes.value.ok) ? await liveRes.value.json() : null;
+        const adjData = (adjRes.status === "fulfilled" && adjRes.value.ok) ? await adjRes.value.json() : null;
 
-        // Match archive-shift.js adjustment structure: adjustmentsData.total
         let adjTotal = 0;
-        if (typeof adjData === "number") {
-            adjTotal = adjData;
-        } else if (adjData && typeof adjData === "object") {
-            adjTotal = Number(adjData.total) || 0;
+        if (typeof adjData === "number") adjTotal = adjData;
+        else if (adjData && typeof adjData === "object") adjTotal = Number(adjData.total) || 0;
+
+        const liveCasesNow = Math.max(0, Number((liveData && liveData.total_cases) || 0) + adjTotal);
+        const liveStatusStr = liveData && liveData.line_status ? liveData.line_status : "Shift Inactive";
+
+        // 2. Instant Greeting Handler ("hello", "hi", "hey")
+        if (/^(hi|hello|hey|salam|good morning|good evening|help)[\s!?.]*$/i.test(lowerMsg)) {
+            return {
+                statusCode: 200,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    reply: `Hello! I'm your Factory AI Analyst. Right now the line status is **${liveStatusStr}** (${liveCasesNow.toLocaleString()} live cases).\n\nYou can ask me things like:\n• *"30 September production"*\n• *"September total cases and tons"*\n• *"Breakdown time in August"*\n• *"Plot a bar chart of the last 7 shifts"*`
+                })
+            };
         }
 
-        // 2. Normalize all shift records using your exact history.html & archive-shift.js schema
+        // 3. Normalize all shift records
         const rawEntries = rawHistory ? Object.values(rawHistory) : [];
         const allShifts = rawEntries
             .filter(Boolean)
@@ -117,12 +114,12 @@ exports.handler = async function(event, context) {
 
                 return {
                     date: s.date || (d ? `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}` : "Unknown"),
-                    year: d ? d.getFullYear() : null,
+                    day: d ? d.getDate() : null,
                     month: d ? d.getMonth() : null,
+                    year: d ? d.getFullYear() : null,
                     cases,
                     tons,
                     oee,
-                    has_report: !!r,
                     source: s.source === "legacy_manual" ? "legacy_manual" : "automated",
                     downtime_mins: Math.round(trueDowntimeSec / 60),
                     changeover_mins: Math.round(changeoverSec / 60),
@@ -133,17 +130,45 @@ exports.handler = async function(event, context) {
                 };
             });
 
-        // 3. SMART JS FILTER: Filter by Month, Year, Relative Range, or Variant
+        // 4. SMART JS FILTER: Detect Specific Date (e.g. "30 september" or "30-09-2026"), Month, or Year
         let matchedMonths = [];
-        const words = lowerMsg.replace(/[^a-z0-9\s]/g, " ").split(/\s+/);
-        words.forEach(w => {
-            if (MONTHS[w] !== undefined && !matchedMonths.includes(MONTHS[w])) {
-                matchedMonths.push(MONTHS[w]);
-            }
-        });
+        let requestedDay = null;
+        let requestedYear = null;
 
-        const yearMatch = lowerMsg.match(/\b(202\d)\b/);
-        const requestedYear = yearMatch ? Number(yearMatch[1]) : null;
+        // Check full numeric date first: DD-MM-YYYY or DD/MM/YYYY
+        const fullDateMatch = lowerMsg.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](202\d))?\b/);
+        if (fullDateMatch) {
+            requestedDay = Number(fullDateMatch[1]);
+            matchedMonths = [Number(fullDateMatch[2]) - 1];
+            if (fullDateMatch[3]) requestedYear = Number(fullDateMatch[3]);
+        } else {
+            // Check year
+            const yearMatch = lowerMsg.match(/\b(202\d)\b/);
+            if (yearMatch) requestedYear = Number(yearMatch[1]);
+
+            // Check month names
+            const words = lowerMsg.replace(/[^a-z0-9\s]/g, " ").split(/\s+/);
+            words.forEach(w => {
+                if (MONTHS[w] !== undefined && !matchedMonths.includes(MONTHS[w])) {
+                    matchedMonths.push(MONTHS[w]);
+                }
+            });
+
+            // Check day number paired with a month name (e.g. "30 september", "30th sep", "sep 30")
+            if (matchedMonths.length === 1) {
+                const dayPattern = /\b([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/g;
+                let m;
+                while ((m = dayPattern.exec(lowerMsg)) !== null) {
+                    const num = Number(m[1]);
+                    // Make sure the number isn't part of "last 7 days" or "30 shifts"
+                    const afterNum = lowerMsg.slice(m.index + m[0].length).trim();
+                    if (!/^(shift|day|week|month|hour|min)/i.test(afterNum)) {
+                        requestedDay = num;
+                        break;
+                    }
+                }
+            }
+        }
 
         const now = new Date();
         if (lowerMsg.includes("this month") || lowerMsg.includes("current month")) {
@@ -168,10 +193,17 @@ exports.handler = async function(event, context) {
                     .map(s => s.year);
                 if (availableYears.length > 0) targetYear = Math.max(...availableYears);
             }
+
             filteredShifts = filteredShifts.filter(s =>
                 matchedMonths.includes(s.month) && (!targetYear || s.year === targetYear)
             );
-            filterLabel = `${matchedMonths.map(m => MONTH_NAMES[m]).join(", ")}${targetYear ? " " + targetYear : ""}`;
+
+            if (requestedDay !== null) {
+                filteredShifts = filteredShifts.filter(s => s.day === requestedDay);
+                filterLabel = `${requestedDay} ${MONTH_NAMES[matchedMonths[0]]}${targetYear ? " " + targetYear : ""}`;
+            } else {
+                filterLabel = `${matchedMonths.map(m => MONTH_NAMES[m]).join(", ")}${targetYear ? " " + targetYear : ""}`;
+            }
         } else if (lowerMsg.includes("last 7") || lowerMsg.includes("last week") || lowerMsg.includes("past week")) {
             filteredShifts = allShifts.slice(-7);
             filterLabel = "Last 7 Shifts";
@@ -183,16 +215,10 @@ exports.handler = async function(event, context) {
             filterLabel = "Latest 30 Shifts";
         }
 
-        // 4. Exact JavaScript Mathematical Aggregator (Zero AI Math Hallucinations)
+        // 5. Exact JS Mathematical Aggregator
         function aggregateShifts(shiftsArray) {
-            let totalCases = 0;
-            let totalTons = 0;
-            let totalDowntimeMins = 0;
-            let totalChangeoverMins = 0;
-            let totalBreakdowns = 0;
-            let oeeSum = 0;
-            let oeeCount = 0;
-            let legacyCount = 0;
+            let totalCases = 0, totalTons = 0, totalDowntimeMins = 0, totalChangeoverMins = 0, totalBreakdowns = 0;
+            let oeeSum = 0, oeeCount = 0, legacyCount = 0;
             const byVariant = {};
             const byMonth = {};
 
@@ -208,14 +234,12 @@ exports.handler = async function(event, context) {
                     oeeCount++;
                 }
 
-                // Aggregate per-variant cases and tons from report
                 Object.entries(s.variant_totals || {}).forEach(([vName, vCases]) => {
                     if (!byVariant[vName]) byVariant[vName] = { cases: 0, tons: 0 };
                     byVariant[vName].cases += Number(vCases || 0);
                     byVariant[vName].tons = Number((byVariant[vName].tons + Number((s.variant_tons && s.variant_tons[vName]) || 0)).toFixed(2));
                 });
 
-                // Aggregate per-month summary
                 const mKey = (s.year && s.month !== null) ? `${MONTH_NAMES[s.month]} ${s.year}` : "Unknown";
                 if (!byMonth[mKey]) byMonth[mKey] = { shifts: 0, cases: 0, tons: 0, legacy_shifts: 0 };
                 byMonth[mKey].shifts += 1;
@@ -235,14 +259,13 @@ exports.handler = async function(event, context) {
                 total_changeover_mins: totalChangeoverMins,
                 total_breakdowns: totalBreakdowns,
                 variants: byVariant,
-                monthly_Rollup: byMonth
+                monthly_rollup: byMonth
             };
         }
 
         const stats = aggregateShifts(filteredShifts);
-        const globalMonthly = aggregateShifts(allShifts).monthly_Rollup;
+        const globalMonthly = aggregateShifts(allShifts).monthly_rollup;
 
-        // Only send compact daily rows (max 35) to keep payload tiny and fast
         const compactRows = filteredShifts.slice(-35).map(s => ({
             date: s.date,
             cases: s.cases,
@@ -253,92 +276,116 @@ exports.handler = async function(event, context) {
             variants: s.variant_totals
         }));
 
-        const liveCasesNow = Math.max(0, Number((liveData && liveData.total_cases) || 0) + adjTotal);
-        const liveStatusText = liveData
-            ? `Status: ${liveData.line_status || "Shift Inactive"}, Live Cases (with adjustments): ${liveCasesNow.toLocaleString()}, Breakdown: ${Math.round(Number(liveData.breakdown_seconds || 0) / 60)} mins`
-            : "No active shift running right now.";
-
-        // 5. Build System Prompt with Pre-Calculated JS Numbers
+        // 6. System Prompt
         const systemPrompt = `You are the Factory AI Analyst for a Unilever production line.
 
 LIVE ACTIVE SHIFT RIGHT NOW:
-${liveStatusText}
+Status: ${liveStatusStr}, Live Cases: ${liveCasesNow.toLocaleString()}, Breakdown: ${Math.round(Number((liveData && liveData.breakdown_seconds) || 0) / 60)} mins.
 
 VERIFIED JS-CALCULATED TOTALS FOR "${filterLabel}":
-- Total Shifts: ${stats.shift_count} (${stats.automated_count} automated, ${stats.legacy_count} legacy_manual)
+- Matched Shifts: ${stats.shift_count} (${stats.automated_count} automated, ${stats.legacy_count} legacy_manual)
 - Total Cases Produced: ${stats.total_cases.toLocaleString()} cases
 - Total Tonnage: ${stats.total_tons.toFixed(2)} tons
 - Average OEE: ${stats.avg_oee !== null ? stats.avg_oee + "%" : "N/A"}
 - Total True Downtime: ${stats.total_downtime_mins} mins (${(stats.total_downtime_mins / 60).toFixed(1)} hrs) across ${stats.total_breakdowns} breakdowns
 - Total Changeover Time: ${stats.total_changeover_mins} mins
-- Production by Variant (Cases & Tons): ${JSON.stringify(stats.variants)}
+- Production by Variant: ${JSON.stringify(stats.variants)}
 
 ALL-TIME MONTHLY ROLLUP:
 ${JSON.stringify(globalMonthly)}
 
-SHIFT-BY-SHIFT RECORDS FOR "${filterLabel}":
+SHIFT RECORDS FOR "${filterLabel}":
 ${JSON.stringify(compactRows)}
 
-STRICT RULES:
-1. ALWAYS use the VERIFIED JS-CALCULATED TOTALS or ALL-TIME MONTHLY ROLLUP above. Never manually add numbers yourself.
-2. Be extremely concise and direct (1 to 3 sentences for standard questions).
-3. For general questions (e.g., "tell me August production"), state ONLY the final total cases and total tons (and OEE if relevant) in 1–2 sentences. Do NOT list shift-by-shift details unless explicitly asked.
-4. If the matched records include "legacy_manual" shifts, briefly mention that legacy manual records do not contain automated breakdown or hourly timing logs.
-5. If the user asks for a graph, chart, or visual plot, output a valid Chart.js configuration object wrapped inside \`\`\`json and \`\`\` markers, followed by a 1-sentence summary.`;
+RULES:
+1. ALWAYS use the VERIFIED JS-CALCULATED TOTALS above. Never manually add numbers yourself.
+2. If Matched Shifts is 0, clearly tell the user no shift record was saved for ${filterLabel}.
+3. Be concise and direct (1 to 3 sentences for standard questions).
+4. If the matched records include "legacy_manual" shifts, mention that legacy manual entries do not have automated breakdown or hourly timing logs.
+5. If the user asks for a graph or chart, output a valid Chart.js configuration wrapped in \`\`\`json and \`\`\` markers.`;
 
         let replyText = "";
+        let aiDebugReason = "";
 
-        // 6. PRIMARY AI ENGINE: Groq (Llama 3.3 70B - ~0.3s response)
-        if (process.env.GROQ_API_KEY) {
-            try {
-                const groqRes = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model: "llama-3.3-70b-versatile",
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: message }
-                        ],
-                        temperature: 0.1,
-                        max_tokens: 750
-                    })
-                }, 4800);
-
-                if (groqRes.ok) {
-                    const groqData = await groqRes.json();
-                    replyText = sanitizeChartReply(groqData.choices?.[0]?.message?.content);
-                } else {
-                    console.warn("Groq HTTP status:", groqRes.status);
-                }
-            } catch (err) {
-                console.warn("Groq failover:", err.message);
-            }
-        }
-
-        // 7. BACKUP AI ENGINE: Gemini Flash (Instant failover if Groq key is missing or busy)
-        if (!replyText && process.env.GEMINI_API_KEY) {
-            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            const backupModels = ["gemini-2.5-flash", "gemini-2.0-flash"];
-
-            for (const modelName of backupModels) {
+        // 7. PRIMARY ENGINE: Groq (Tries Llama 3.3 70B, then Llama 3.1 8B Instant)
+        const groqKey = (process.env.GROQ_API_KEY || "").trim();
+        if (groqKey) {
+            const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+            for (const gModel of groqModels) {
                 if (replyText) break;
                 try {
-                    const model = genAI.getGenerativeModel({ model: modelName });
-                    const result = await model.generateContent([systemPrompt, message]);
-                    replyText = sanitizeChartReply(result.response.text());
+                    const groqRes = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${groqKey}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            model: gModel,
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: message }
+                            ],
+                            temperature: 0.1,
+                            max_tokens: 750
+                        })
+                    }, 4500);
+
+                    if (groqRes.ok) {
+                        const groqData = await groqRes.json();
+                        replyText = sanitizeChartReply(groqData.choices?.[0]?.message?.content);
+                    } else {
+                        aiDebugReason = `Groq HTTP ${groqRes.status}`;
+                    }
                 } catch (err) {
-                    console.warn(`Gemini ${modelName} error:`, err.message);
+                    aiDebugReason = `Groq ${err.message}`;
+                }
+            }
+        } else {
+            aiDebugReason = "GROQ_API_KEY not set in Netlify";
+        }
+
+        // 8. BACKUP ENGINE: Direct Gemini REST API (No SDK version issues)
+        const geminiKey = (process.env.GEMINI_API_KEY || "").trim();
+        if (!replyText && geminiKey) {
+            const geminiModels = ["gemini-2.5-flash", "gemini-1.5-flash"];
+            for (const mName of geminiModels) {
+                if (replyText) break;
+                try {
+                    const gemUrl = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${geminiKey}`;
+                    const gemRes = await fetchWithTimeout(gemUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: `${systemPrompt}\n\nUser Question: ${message}` }] }]
+                        })
+                    }, 4000);
+
+                    if (gemRes.ok) {
+                        const gemData = await gemRes.json();
+                        const rawText = gemData.candidates?.[0]?.content?.parts?.[0]?.text;
+                        replyText = sanitizeChartReply(rawText);
+                    }
+                } catch (err) {
+                    console.warn(`Gemini ${mName} failed:`, err.message);
                 }
             }
         }
 
-        // 8. GUARANTEED NON-BLANK FALLBACK (Direct JS answer if all AI APIs are unreachable)
+        // 9. SMART JS FALLBACK (Answers specific dates & variants accurately even without AI)
         if (!replyText) {
-            replyText = `**${filterLabel} Summary:** **${stats.total_cases.toLocaleString()} cases** (**${stats.total_tons.toFixed(2)} tons**) across **${stats.shift_count} shifts**${stats.avg_oee ? ` with an average OEE of **${stats.avg_oee}%**` : ""}. Total downtime: **${stats.total_downtime_mins} mins**.`;
+            if (stats.shift_count === 0) {
+                replyText = `No production shift records were found for **${filterLabel}**.`;
+            } else {
+                const variantList = Object.entries(stats.variants)
+                    .map(([v, d]) => `${v}: ${d.cases.toLocaleString()} cases (${d.tons}t)`)
+                    .join(", ");
+                const legacyNote = stats.legacy_count > 0
+                    ? ` *(Includes ${stats.legacy_count} legacy manual record${stats.legacy_count > 1 ? "s" : ""} without breakdown timing logs)*`
+                    : "";
+
+                replyText = `**${filterLabel}:** **${stats.total_cases.toLocaleString()} cases** (**${stats.total_tons.toFixed(2)} tons**) across **${stats.shift_count} shift${stats.shift_count > 1 ? "s" : ""}**${stats.avg_oee ? ` | OEE: **${stats.avg_oee}%**` : ""} | Downtime: **${stats.total_downtime_mins} mins**.${variantList ? `\n• **Variants:** ${variantList}` : ""}${legacyNote}`;
+            }
         }
 
         return {
