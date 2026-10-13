@@ -374,6 +374,7 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
         return `⚠️ No production shift records were found for **${filterLabel}**.`;
     }
 
+    const asksDaily = /\b(daily|date wise|day by day|each day|shift by shift)\b/i.test(lowerMsg);
     const asksChangeovers = /\b(changeover|changeovers|change over|change overs|mechanical|size change|color change|colour change)\b/i.test(lowerMsg);
     const asksBestOrWorst = /\b(best|highest|most|top|worst|lowest|least|record|peak)\b/i.test(lowerMsg);
     const asksBrandSplit = /\b(lux|lifebuoy|brand)\b/i.test(lowerMsg);
@@ -389,6 +390,14 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
     const legacyNote = stats.legacy_count > 0
         ? `\n\n*ℹ️ Includes ${stats.legacy_count} legacy manual record${stats.legacy_count > 1 ? "s" : ""} (no automated breakdown or changeover logs).*`
         : "";
+
+    // 0. Instant Native JS Handler for "Date Wise" / "Daily" Requests
+    if (asksDaily) {
+        const slice = stats.shifts_list.slice(-35); // Cap to 35 to keep response clean
+        const dailyList = slice.map(s => `• **${s.date}:** ${s.cases.toLocaleString()} cases (${s.tons.toFixed(2)} t)`).join("\n");
+        const capNote = stats.shifts_list.length > 35 ? `\n\n*(Showing the latest 35 of ${stats.shifts_list.length} shifts)*` : "";
+        return `📅 **${filterLabel} — Daily Breakdown**\n${dailyList}${capNote}`;
+    }
 
     // 1. Dedicated Changeover Responder (Count + Color vs. Mechanical vs. Both)
     if (asksChangeovers) {
@@ -451,7 +460,7 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
             : `ℹ️ No OEE percentage was calculated for **${filterLabel}**.`;
     }
 
-    // 5. Generic Shift / Period Summary (No Brand Split Included!)
+    // 5. Generic Shift / Period Summary (No Brand Split Included)
     const variantBullets = Object.entries(stats.variants)
         .sort((a, b) => b[1].cases - a[1].cases)
         .map(([v, d]) => `• **${v}:** ${d.cases.toLocaleString()} cases *(${d.tons.toFixed(2)} t)*`)
@@ -518,7 +527,7 @@ exports.handler = async function(event, context) {
             .sort((a, b) => (a.shift_start || a.saved_at || 0) - (b.shift_start || b.saved_at || 0));
 
         let lastGlobalVariant = null;
-        let lastGlobalTransitionKey = null; // Prevents double-counting if identical changeover is tagged at end of Shift A and start of Shift B
+        let lastGlobalTransitionKey = null;
 
         const allShifts = sortedRaw.map(s => {
             const d = resolveShiftDate(s);
@@ -546,7 +555,6 @@ exports.handler = async function(event, context) {
                 const toVar = String(c.to || "").trim();
                 if (!toVar) return;
 
-                // If starting_variant was set equal to the first changeover's "to" variant, use previous shift's last variant as "from"
                 let fromVar = cursorVariant;
                 if (fromVar && fromVar.toLowerCase() === toVar.toLowerCase() && lastGlobalVariant && lastGlobalVariant.toLowerCase() !== toVar.toLowerCase()) {
                     fromVar = lastGlobalVariant;
@@ -556,9 +564,7 @@ exports.handler = async function(event, context) {
                 const durMins = Math.round(Number(c.duration || 0) / 60);
                 const prevInShift = dedupedChangeovers[dedupedChangeovers.length - 1];
 
-                // Deduplicate Rule 1: Same transition (or same target variant) repeated consecutively within the same shift (e.g., split event or duplicate row)
                 if (prevInShift && (prevInShift.transitionKey === transitionKey || prevInShift.to.toLowerCase() === toVar.toLowerCase())) {
-                    // If it's not an exact timestamp clone, add the split duration to the single changeover
                     if (prevInShift.rawStart !== c.start || prevInShift.mins !== durMins) {
                         prevInShift.mins += durMins;
                     }
@@ -566,7 +572,6 @@ exports.handler = async function(event, context) {
                     return;
                 }
 
-                // Deduplicate Rule 2: Exact same transition already tagged at the end of the immediately preceding shift
                 if (dedupedChangeovers.length === 0 && lastGlobalTransitionKey === transitionKey) {
                     cursorVariant = toVar;
                     return;
@@ -583,7 +588,7 @@ exports.handler = async function(event, context) {
                     time: formatQatarTime(c.start),
                     from: fromVar || "Previous Variant",
                     to: toVar,
-                    type: coType, // "color" | "mechanical" | "both"
+                    type: coType,
                     type_label: typeLabel,
                     mins: durMins,
                     transitionKey
@@ -593,7 +598,6 @@ exports.handler = async function(event, context) {
                 lastGlobalTransitionKey = transitionKey;
             });
 
-            // Update last known variant at the end of this shift
             if (cursorVariant) {
                 lastGlobalVariant = cursorVariant;
             } else if (Object.keys(variantTotals).length > 0) {
@@ -694,7 +698,7 @@ exports.handler = async function(event, context) {
             filterLabel = activeFilter.label;
         }
 
-        // 5. Complete JS Mathematical Aggregator (With Deduplicated Color / Mechanical / Both Changeover Counts)
+        // 5. Complete JS Mathematical Aggregator
         function aggregateShifts(shiftsArray) {
             let totalCases = 0, totalTons = 0, totalDowntimeMins = 0;
             let totalBreakMins = 0, totalBreakdowns = 0, oeeSum = 0, oeeCount = 0, legacyCount = 0;
@@ -733,7 +737,6 @@ exports.handler = async function(event, context) {
                     unreportedCases += s.cases;
                 }
 
-                // Aggregate Deduplicated Changeovers by Type (Color vs Mechanical vs Both)
                 (s.changeovers_detail || []).forEach(co => {
                     changeoverStats.total_count += 1;
                     changeoverStats.total_mins += co.mins;
@@ -819,6 +822,7 @@ exports.handler = async function(event, context) {
 
             return {
                 shift_count: shiftsArray.length,
+                shifts_list: shiftsArray,
                 legacy_count: legacyCount,
                 automated_count: shiftsArray.length - legacyCount,
                 unreported_count: unreportedCount,
@@ -848,8 +852,9 @@ exports.handler = async function(event, context) {
         const stats = aggregateShifts(filteredShifts);
         const globalMonthly = aggregateShifts(allShifts).monthly_rollup;
 
-        // 6. Zero-AI Fast Path for Empty Dates, Direct Changeover Queries & Chart/Graph Requests
-        if (stats.shift_count === 0) {
+        // Bypasses AI completely for list generation so the AI never hallucinates Markdown tables
+        const wantsDaily = /\b(daily|date wise|day by day|each day|every day|shift by shift)\b/i.test(lowerMsg);
+        if (stats.shift_count === 0 || wantsDaily) {
             return {
                 statusCode: 200,
                 headers: { "Content-Type": "application/json" },
@@ -875,28 +880,21 @@ exports.handler = async function(event, context) {
         const compactRows = filteredShifts.slice(-25).map(s => {
             const base = {
                 date: s.date,
-                shift_time: `${s.shift_start_str} - ${s.shift_end_str}`,
                 cases: s.cases,
                 tons: Number(s.tons.toFixed(2)),
                 oee: s.oee !== null ? Number(s.oee.toFixed(1)) : null,
                 downtime_mins: s.downtime_mins,
                 changeover_count: s.changeovers_detail.length,
-                changeover_mins: s.changeover_mins,
-                break_mins: s.break_mins,
                 source: s.source,
-                report_ready: s.has_report,
                 variants: s.variant_totals
             };
             if (isSmallSlice) {
-                base.hourly_production = s.hourly_production;
                 base.changeovers = s.changeovers_detail;
                 base.breakdowns = s.breakdowns_detail;
-                base.breaks = s.breaks_detail;
             }
             return base;
         });
 
-        // Only expose brand split to the AI when the user explicitly asks about brands, LUX, or Lifebuoy
         const userAsksBrand = /\b(lux|lifebuoy|brand)\b/i.test(lowerMsg);
         const brandSectionForPrompt = userAsksBrand
             ? `- PRE-CALCULATED BRAND SPLIT (LUX vs Lifebuoy): ${JSON.stringify(stats.brands)}\n`
@@ -908,12 +906,11 @@ LIVE ACTIVE SHIFT RIGHT NOW:
 Status: ${liveStatusStr}, Live Cases: ${liveCasesNow.toLocaleString()}, Breakdown: ${Math.round(Number((liveData && liveData.breakdown_seconds) || 0) / 60)} mins.
 
 VERIFIED JS-CALCULATED TOTALS FOR "${filterLabel}" (${stats.shift_count} Shifts):
-- Matched Shifts: ${stats.shift_count} (${stats.automated_count} automated, ${stats.legacy_count} legacy_manual, ${stats.unreported_count} awaiting OEE/tonnage report)
+- Matched Shifts: ${stats.shift_count} (${stats.unreported_count} awaiting OEE/tonnage report)
 - Total Cases Produced: ${stats.total_cases.toLocaleString()} cases
 - Total Tonnage: ${stats.total_tons.toFixed(2)} tons
 - Average OEE: ${stats.avg_oee !== null ? stats.avg_oee + "%" : "N/A"}
 - Total True Downtime: ${stats.total_downtime_mins} mins (${(stats.total_downtime_mins / 60).toFixed(1)} hrs) across ${stats.total_breakdowns} breakdowns
-- Total Break Time: ${stats.total_break_mins} mins
 - VERIFIED DEDUPLICATED CHANGEOVERS FOR "${filterLabel}":
   * Total Changeovers Count: ${stats.changeovers.total_count} changeovers (${stats.changeovers.total_mins} mins total)
   * Color Changeovers (Variant changed, size same): ${stats.changeovers.color_count} (${stats.changeovers.color_mins} mins)
@@ -921,15 +918,8 @@ VERIFIED JS-CALCULATED TOTALS FOR "${filterLabel}" (${stats.shift_count} Shifts)
   * Both (Color + Size changed together): ${stats.changeovers.both_count} (${stats.changeovers.both_mins} mins)
   * Tagged Changeover Events List: ${JSON.stringify(stats.changeovers.events.slice(-20))}
 - Peak Production Hour Bucket: ${stats.peak_hour ? `${stats.peak_hour.hour} (${stats.peak_hour.cases.toLocaleString()} cases)` : "N/A"}
-- Hourly Production Totals: ${JSON.stringify(stats.hourly_totals)}
 - ALL-SHIFT RECORDS (BEST / WORST IN PERIOD): ${JSON.stringify(stats.records)}
 ${brandSectionForPrompt}- Production by Individual Variant: ${JSON.stringify(stats.variants)}
-
-ALL-TIME MONTHLY ROLLUP:
-${JSON.stringify(globalMonthly)}
-
-SHIFT RECORDS FOR "${filterLabel}":
-${JSON.stringify(compactRows)}
 
 STRICT VISUAL FORMATTING & CONTENT RULES (CRITICAL):
 1. ALWAYS use the VERIFIED JS-CALCULATED TOTALS and VERIFIED DEDUPLICATED CHANGEOVERS above. NEVER manually add numbers yourself.
@@ -939,11 +929,11 @@ STRICT VISUAL FORMATTING & CONTENT RULES (CRITICAL):
    - Start with a bold title line and a relevant emoji including "${filterLabel}".
    - Put each metric or variant on its own separate line starting with "• " and bold the label/numbers.
    - NEVER use ### headings or Markdown |---| tables.
-5. Answer ONLY what the user asked concisely.`;
+5. CLARIFICATION RULE: If the user's question is too vague, ambiguous, or asks for a comparison but doesn't specify the dates/brands, DO NOT guess. Politely ask a 1-sentence clarifying question (e.g., "Could you specify which date or month you'd like me to check?").
+6. Answer ONLY what the user asked concisely.`;
 
         let replyText = "";
 
-        // 8. PRIMARY ENGINE: Groq Active Production Models (with conversational memory)
         const groqKey = (process.env.GROQ_API_KEY || "").trim();
         if (groqKey) {
             const groqModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
@@ -989,7 +979,6 @@ STRICT VISUAL FORMATTING & CONTENT RULES (CRITICAL):
             }
         }
 
-        // 9. FOCUSED JS RESPONDER FALLBACK
         if (!replyText) {
             replyText = buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear);
         }
