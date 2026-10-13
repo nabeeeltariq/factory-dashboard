@@ -1592,6 +1592,8 @@
                 try { new Chart(document.getElementById(canvasId).getContext('2d'), config); } catch(e) { console.error(e); }
             }
 
+            const chatMemory = [];
+
             async function sendMessage() {
                 const msg = input.value.trim();
                 if(!msg) return;
@@ -1609,22 +1611,27 @@
                     const response = await fetch('/.netlify/functions/chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: msg })
+                        body: JSON.stringify({ message: msg, history: chatMemory.slice(-6) })
                     });
                     
                     const data = await response.json();
-                    const reply = data.reply;
+                    const reply = data.reply || "⚠️ No response received from server.";
                     
                     historyDiv.removeChild(loadingBubble);
                     
                     const jsonMatch = reply.match(/```json([\s\S]*?)```/);
+                    let cleanReplyForMemory = reply;
                     if(jsonMatch) {
                         addGraph(JSON.parse(jsonMatch[1]));
                         const text = reply.replace(jsonMatch[0], '').trim();
+                        cleanReplyForMemory = text || "Chart generated.";
                         if(text) addMessage(text, true);
                     } else {
                         addMessage(reply, true);
                     }
+
+                    chatMemory.push({ role: 'user', content: msg });
+                    chatMemory.push({ role: 'assistant', content: cleanReplyForMemory });
                 } catch(e) {
                     historyDiv.removeChild(loadingBubble);
                     addMessage("Connection error. Cannot reach AI server.", true);
