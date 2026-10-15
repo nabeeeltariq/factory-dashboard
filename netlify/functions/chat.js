@@ -256,7 +256,7 @@ function buildNativeChartReply(lowerMsg, filterLabel, stats, filteredShifts, glo
     const chartConfig = {
         type: chartType,
         data: { labels: labels, datasets: [{ label: datasetLabel, data: dataValues, backgroundColor: isPie ? palette.slice(0, labels.length) : (wantsDowntime ? "#e11d48" : "#0d9488"), borderColor: isPie ? "#ffffff" : (wantsDowntime ? "#be123c" : "#0f766e"), borderWidth: 1, borderRadius: chartType === "bar" ? 6 : 0, fill: chartType === "line" ? false : true, tension: 0.3 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: isPie, position: "bottom" }, title: { display: true, text: chartTitle, font: { size: 14, weight: "bold" } } }, scales: { y: { beginAtZero: true } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: isPie, position: "bottom" }, title: { display: true, text: chartTitle, font: { size: 14, weight: "bold" } } }, scales: isPie ? {} : { y: { beginAtZero: true } } }
     };
 
     return "```json\n" + JSON.stringify(chartConfig) + "\n```\n📊 **" + chartTitle + ":** Total of **" + stats.total_cases.toLocaleString() + " cases** (**" + stats.total_tons.toFixed(2) + " tons**) across **" + stats.shift_count + " shifts**.";
@@ -426,11 +426,14 @@ exports.handler = async function(event, context) {
             else if (Object.keys(variantTotals).length > 0) lastGlobalVariant = Object.keys(variantTotals)[0];
             if (dedupedChangeovers.length === 0) lastGlobalTransitionKey = null;
 
+            const dedupedChangeoverMins = dedupedChangeovers.reduce((sum, item) => sum + item.mins, 0);
+
             return {
                 date: formattedDate, day: d ? d.day : null, month: d ? d.month : null, year: d ? d.year : null, dayValue: d ? d.dayValue : 0,
                 shift_start_str: formatQatarTime(s.shift_start), shift_end_str: formatQatarTime(s.shift_end),
                 cases, tons, oee, has_report: !!r, source: s.source === "legacy_manual" ? "legacy_manual" : "automated",
-                downtime_mins: Math.round(trueDowntimeSec / 60), changeover_mins: dedupedChangeovers.length > 0 ? dedupedChangeoverMins : Math.round(Number((r && r.changeover_time_seconds) || 0) / 60),
+                downtime_mins: Math.round(trueDowntimeSec / 60),
+                changeover_mins: dedupedChangeovers.length > 0 ? dedupedChangeoverMins : Math.round(Number((r && r.changeover_time_seconds) || 0) / 60),
                 break_mins: Math.round(breakSec / 60), breakdown_count: Number((r && r.true_breakdown_count) ?? s.breakdown_count ?? 0),
                 variant_totals: variantTotals, variant_tons: variantTons, hourly_production: hourly,
                 changeovers_detail: dedupedChangeovers, breakdowns_detail: breakdowns.map(b => ({ time: formatQatarTime(b.start), mins: Math.round((b.duration || 0) / 60) }))
@@ -542,7 +545,6 @@ exports.handler = async function(event, context) {
             let peakHour = null;
             Object.entries(hourlyTotals).forEach(([hour, cases]) => { if (!peakHour || cases > peakHour.cases) peakHour = { hour, cases }; });
 
-            // Build Month-by-Month breakdown for queries with multiple months
             const matchedMonthBreakdown = {};
             if (matchedMonths && matchedMonths.length > 0) {
                 matchedMonths.forEach(mIdx => {
@@ -582,7 +584,6 @@ exports.handler = async function(event, context) {
         const stats = aggregateShifts(filteredShifts);
         const globalMonthly = aggregateShifts(allShifts).monthly_rollup;
 
-        // Bypasses AI completely for list generation and multi-month comparison
         const wantsDaily = /\b(daily|date wise|day by day|each day|every day|shift by shift)\b/i.test(lowerMsg);
         const asksSeparate = /\b(separately|sepratly|separate|each|vs|versus|compare|both)\b/i.test(lowerMsg);
         const isMultiMonth = Object.keys(stats.matched_month_breakdown || {}).length > 1;
@@ -624,6 +625,7 @@ ${multiMonthSectionForPrompt}- VERIFIED DEDUPLICATED CHANGEOVERS FOR "${filterLa
   * Color Changeovers (Variant changed, size same): ${stats.changeovers.color_count} (${stats.changeovers.color_mins} mins)
   * Mechanical Changeovers (Size/GM changed, variant same): ${stats.changeovers.mechanical_count} (${stats.changeovers.mechanical_mins} mins)
   * Both (Color + Size changed together): ${stats.changeovers.both_count} (${stats.changeovers.both_mins} mins)
+  * Tagged Changeover Events List (Chronological, Oldest to Newest): ${JSON.stringify(stats.changeovers.events.slice(-25))}
 - Peak Production Hour Bucket: ${stats.peak_hour ? `${stats.peak_hour.hour} (${stats.peak_hour.cases.toLocaleString()} cases)` : "N/A"}
 - ALL-SHIFT RECORDS (BEST / WORST IN PERIOD): ${JSON.stringify(stats.records)}
 ${brandSectionForPrompt}- Production by Individual Variant: ${JSON.stringify(stats.variants)}
@@ -634,10 +636,11 @@ ${JSON.stringify(globalMonthly)}
 STRICT RULES (CRITICAL):
 1. ZERO MATH RULE: You are strictly forbidden from guessing or manually adding numbers. ONLY use the VERIFIED JS-CALCULATED TOTALS above.
 2. MONTH COMPARISON RULE: If the user asks for months "separately", "each", "vs", or "compare", ALWAYS list each individual month from PRE-CALCULATED MONTH-BY-MONTH BREAKDOWN above. Never claim separate figures aren't available.
-3. CLARIFICATION RULE: DO NOT ask for clarification if the user already named the months or entities. Only ask a brief 1-sentence clarifying question if the question is genuinely ambiguous.
-4. NEVER show the LUX vs. Lifebuoy brand split in generic shift answers unless they explicitly ask for "brand", "LUX", or "Lifebuoy".
-5. Format your response like a clean executive card (use • bullet points and bolding). Do not use Markdown tables or ### headers.
-6. Answer ONLY what the user asked concisely.`;
+3. CHANGEOVER DETAILS RULE: If the user asks for "last mechanical changeover", "last color changeover", or changeover details, look at the "Tagged Changeover Events List" above and report the latest matching event's Date, Time, From -> To variants, Type, and Duration (mins).
+4. CLARIFICATION RULE: DO NOT ask for clarification if the user already named the months, brands, or changeover type. Only ask a brief 1-sentence clarifying question if the question is genuinely ambiguous.
+5. NEVER show the LUX vs. Lifebuoy brand split in generic shift answers unless they explicitly ask for "brand", "LUX", or "Lifebuoy".
+6. Format your response like a clean executive card (use • bullet points and bolding). Do not use Markdown tables or ### headers.
+7. Answer ONLY what the user asked concisely.`;
 
         let replyText = "";
         const groqKey = (process.env.GROQ_API_KEY || "").trim();
