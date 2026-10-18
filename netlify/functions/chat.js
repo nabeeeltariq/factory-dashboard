@@ -8,7 +8,9 @@ const MONTHS = {
 };
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Converts epoch timestamp into Qatar Time (GMT+3) HH:MM AM/PM
 function formatQatarTime(ts) {
     if (!ts) return "--:--";
     const d = new Date(Number(ts) + (3 * 3600 * 1000));
@@ -20,6 +22,18 @@ function formatQatarTime(ts) {
     return `${h}:${m} ${ampm}`;
 }
 
+// Formats minutes into "X hours Y minutes" if >= 60 mins
+function formatDuration(totalMins) {
+    const m = Math.round(Number(totalMins) || 0);
+    if (m <= 0) return "0 minutes";
+    if (m < 60) return `${m} minute${m === 1 ? "" : "s"}`;
+    const hrs = Math.floor(m / 60);
+    const rem = m % 60;
+    const hrStr = `${hrs} hour${hrs === 1 ? "" : "s"}`;
+    return rem > 0 ? `${hrStr} ${rem} minute${rem === 1 ? "" : "s"}` : hrStr;
+}
+
+// Splits a variant like "LUX Soft Rose 120GM" into { baseColor: "lux soft rose", sizeGrams: "120GM" }
 function parseVariantParts(variantName) {
     const raw = String(variantName || "").trim();
     const match = raw.match(/^(.*?)\s*(\d+\s*(?:gm|g|kg|ml))\b/i);
@@ -35,6 +49,7 @@ function parseVariantParts(variantName) {
     };
 }
 
+// Classifies a changeover between two variants as "color", "mechanical" (size), or "both"
 function classifyChangeoverType(fromVariant, toVariant) {
     if (!fromVariant || !toVariant) return "color";
     const fromParts = parseVariantParts(fromVariant);
@@ -48,6 +63,7 @@ function classifyChangeoverType(fromVariant, toVariant) {
     return "color";
 }
 
+// Resolves shift date locked to Qatar Time (GMT+3)
 function resolveShiftDate(record) {
     const rawStr = record.date || record.shift_date || (record.report && record.report.date);
     if (rawStr) {
@@ -82,6 +98,7 @@ function resolveShiftDate(record) {
     return null;
 }
 
+// Parses custom "From - To" date ranges
 function parseCustomDateRange(text, defaultYear) {
     const numRange = text.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](202\d))?\s*(?:to|till|until|\-|through|and)\s*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](202\d))?\b/i);
     if (numRange) {
@@ -113,14 +130,47 @@ function parseCustomDateRange(text, defaultYear) {
     return null;
 }
 
-function extractTimeFilter(queryText, allShifts, currentYear, currentMonth) {
+// Extracts timeframe filter with true Qatar calendar support for "Yesterday" and "Today"
+function extractTimeFilter(queryText, allShifts, nowQatar) {
     const lower = (queryText || "").toLowerCase().trim();
+    const currentYear = nowQatar.getUTCFullYear();
+    const currentMonth = nowQatar.getUTCMonth();
+    const currentDay = nowQatar.getUTCDate();
 
     const availableYears = allShifts.filter(s => s.year).map(s => s.year);
     const latestYearInDb = availableYears.length > 0 ? Math.max(...availableYears) : currentYear;
+
+    // 1. Custom Date Range
     const customRange = parseCustomDateRange(lower, latestYearInDb);
     if (customRange) return { type: "range", range: customRange };
 
+    // 2. True Calendar "Yesterday"
+    if (/\byesterday\b/i.test(lower)) {
+        const yest = new Date(nowQatar.getTime() - (24 * 3600 * 1000));
+        const yDay = yest.getUTCDate();
+        const yMonth = yest.getUTCMonth();
+        const yYear = yest.getUTCFullYear();
+        return {
+            type: "calendar",
+            matchedMonths: [yMonth],
+            requestedDay: yDay,
+            requestedYear: yYear,
+            customLabel: `${yDay} ${MONTH_NAMES[yMonth]} ${yYear} (Yesterday)`
+        };
+    }
+
+    // 3. True Calendar "Today" (unless asking "till today")
+    if (/\btoday\b/i.test(lower) && !/\b(till|until|up to)\s+today\b/i.test(lower)) {
+        return {
+            type: "calendar",
+            matchedMonths: [currentMonth],
+            requestedDay: currentDay,
+            requestedYear: currentYear,
+            customLabel: `${currentDay} ${MONTH_NAMES[currentMonth]} ${currentYear} (Today)`
+        };
+    }
+
+    // 4. Explicit Dates / Months / Years
     let matchedMonths = [];
     let requestedDay = null;
     let requestedYear = null;
@@ -157,11 +207,19 @@ function extractTimeFilter(queryText, allShifts, currentYear, currentMonth) {
     if (lower.includes("this month") || lower.includes("current month")) matchedMonths = [currentMonth];
     else if (lower.includes("last month") || lower.includes("previous month")) matchedMonths = [(currentMonth + 11) % 12];
 
-    if (matchedMonths.length > 0 || requestedYear !== null) return { type: "calendar", matchedMonths, requestedDay, requestedYear };
+    if (matchedMonths.length > 0 || requestedYear !== null) {
+        return { type: "calendar", matchedMonths, requestedDay, requestedYear };
+    }
+
+    // 5. Relative Shift Slices
     if (/\b(last 30|recent 30)\b/i.test(lower)) return { type: "slice", count: 30, label: "Latest 30 Shifts" };
     if (/\b(last 7|last week|past week)\b/i.test(lower)) return { type: "slice", count: 7, label: "Last 7 Shifts" };
-    if (/\b(last shift|latest shift|yesterday|last production|latest production|current shift|today)\b/i.test(lower)) return { type: "slice", count: 1, label: "Latest Shift" };
-    if (/(all time|all shift|history|till now|til now|so far|overall|ever)/i.test(lower)) return { type: "all", label: "All Recorded History" };
+    if (/\b(last shift|latest shift|last production|latest production|current shift|previous shift|last run|latest run)\b/i.test(lower)) {
+        return { type: "slice", count: 1, label: "Latest Recorded Shift" };
+    }
+    if (/(all time|all shift|history|till now|til now|till today|until today|so far|overall|ever)/i.test(lower)) {
+        return { type: "all", label: "All Recorded History" };
+    }
 
     return { type: "none" };
 }
@@ -219,12 +277,12 @@ function buildNativeChartReply(lowerMsg, filterLabel, stats, filteredShifts, glo
         dataValues = [stats.changeovers.color_count, stats.changeovers.mechanical_count, stats.changeovers.both_count];
         datasetLabel = "Changeover Count";
         chartTitle = `${filterLabel} — Changeovers by Type (Total: ${stats.changeovers.total_count})`;
-    } else if (wantsHourly && Object.keys(stats.hourly_totals).length > 0) {
-        const sortedHours = Object.entries(stats.hourly_totals).sort(([a], [b]) => a.localeCompare(b));
+    } else if (wantsHourly && Object.keys(stats.hourly_averages).length > 0) {
+        const sortedHours = Object.entries(stats.hourly_averages).sort(([a], [b]) => a.localeCompare(b));
         labels = sortedHours.map(([h]) => h);
         dataValues = sortedHours.map(([, c]) => c);
-        datasetLabel = "Cases Produced";
-        chartTitle = `${filterLabel} — Hourly Production (Cases)`;
+        datasetLabel = stats.shift_count === 1 ? "Cases Produced" : "Avg Cases / Hour";
+        chartTitle = stats.shift_count === 1 ? `${filterLabel} — Hourly Production (Cases)` : `${filterLabel} — Average Hourly Production (Cases/Hr)`;
     } else if (wantsBrand && Object.keys(stats.brands).length > 0) {
         const sortedBrands = Object.entries(stats.brands).sort((a, b) => (wantsTons ? b[1].tons - a[1].tons : b[1].cases - a[1].cases));
         labels = sortedBrands.map(([b]) => b);
@@ -262,16 +320,21 @@ function buildNativeChartReply(lowerMsg, filterLabel, stats, filteredShifts, glo
     return "```json\n" + JSON.stringify(chartConfig) + "\n```\n📊 **" + chartTitle + ":** Total of **" + stats.total_cases.toLocaleString() + " cases** (**" + stats.total_tons.toFixed(2) + " tons**) across **" + stats.shift_count + " shifts**.";
 }
 
-function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear) {
+function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear, firstAutoDateStr) {
     if (stats.shift_count === 0) {
+        const latestShift = allShifts.length > 0 ? allShifts[allShifts.length - 1] : null;
+        const latestHint = latestShift
+            ? `\n• **Most Recent Recorded Shift:** **${latestShift.date}** — **${latestShift.cases.toLocaleString()} cases** (**${latestShift.tons.toFixed(2)} tons**)`
+            : "";
+
         if (matchedMonths && matchedMonths.length === 1) {
             const monthShifts = allShifts.filter(s => s.month === matchedMonths[0] && (!targetYear || s.year === targetYear));
             if (monthShifts.length > 0) {
                 const availableDates = [...new Set(monthShifts.map(s => s.date))].join(", ");
-                return `⚠️ **No Shift Recorded on ${filterLabel}**\n\n📅 **Available Dates in ${MONTH_NAMES[matchedMonths[0]]}:**\n• ${availableDates}`;
+                return `⚠️ **No Shift Recorded on ${filterLabel}**${latestHint}\n\n📅 **Available Dates in ${MONTH_NAMES[matchedMonths[0]]}:**\n• ${availableDates}`;
             }
         }
-        return `⚠️ No production shift records were found for **${filterLabel}**.`;
+        return `⚠️ **No production shift records were found for ${filterLabel}.**${latestHint}`;
     }
 
     const asksDaily = /\b(daily|date wise|day by day|each day|shift by shift)\b/i.test(lowerMsg);
@@ -284,19 +347,24 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
     const asksCasesOnly = /\b(case|cases|boxes)\b/i.test(lowerMsg) && !/(ton|variant|sku|what we produced|breakdown|lux|lifebuoy)/i.test(lowerMsg);
     const asksOeeOnly = /\b(oee|efficiency|target)\b/i.test(lowerMsg);
 
-    const unreportedNote = stats.unreported_count > 0 ? `\n• *⚠️ Note: ${stats.unreported_count} automated shift (${stats.unreported_cases.toLocaleString()} cases) missing OEE/tonnage report.*` : "";
-    const legacyNote = stats.legacy_count > 0 ? `\n\n*ℹ️ Includes ${stats.legacy_count} legacy manual records (no automated breakdown/changeover logs).*` : "";
+    const unreportedNote = stats.unreported_count > 0
+        ? `\n• *⚠️ Note: ${stats.unreported_count} automated shift (${stats.unreported_cases.toLocaleString()} cases) is awaiting a generated OEE/tonnage report.*`
+        : "";
 
-    // 0A. Instant Handler for Multi-Month "Separately" / "VS" Requests
+    const legacyNote = stats.legacy_count > 0
+        ? `\n\n*ℹ️ **Monitoring Note:** Automatic IoT shift monitoring started on **${firstAutoDateStr}** (${stats.automated_count} automated shift${stats.automated_count === 1 ? "" : "s"} in this period). The **${stats.legacy_count} earlier manual shift${stats.legacy_count === 1 ? "" : "s"}** do not contain automated changeover, breakdown, or hourly sensor logs.*`
+        : "";
+
+    // 0A. Multi-Month "Separately" / "VS" Requests
     if (Object.keys(stats.matched_month_breakdown || {}).length > 1 && (asksSeparateOrCompare || asksTonsOnly || asksCasesOnly)) {
         const monthBullets = Object.entries(stats.matched_month_breakdown).map(([mName, mData]) => {
             return `• **${mName}:** **${mData.tons.toFixed(2)} tons** (${mData.cases.toLocaleString()} cases across ${mData.shifts} shifts)`;
         }).join("\n");
 
-        return `📊 **Monthly Breakdown — ${filterLabel}**\n${monthBullets}\n\n• **Combined Total:** **${stats.total_tons.toFixed(2)} tons** (${stats.total_cases.toLocaleString()} cases across ${stats.shift_count} shifts)`;
+        return `📊 **Monthly Breakdown — ${filterLabel}**\n${monthBullets}\n\n• **Combined Total:** **${stats.total_tons.toFixed(2)} tons** (${stats.total_cases.toLocaleString()} cases across ${stats.shift_count} shifts)${legacyNote}`;
     }
 
-    // 0B. Instant Handler for "Date Wise" / "Daily" Requests
+    // 0B. "Date Wise" / "Daily" Requests
     if (asksDaily) {
         const slice = stats.shifts_list.slice(-35);
         const dailyList = slice.map(s => `• **${s.date}:** ${s.cases.toLocaleString()} cases (${s.tons.toFixed(2)} t)`).join("\n");
@@ -304,35 +372,66 @@ function buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMon
         return `📅 **${filterLabel} — Daily Breakdown**\n${dailyList}${capNote}`;
     }
 
+    // 1. Changeover Report
     if (asksChangeovers) {
         const co = stats.changeovers;
-        if (co.total_count === 0) return `🔄 **${filterLabel} — Changeover Summary (${stats.shift_count} Shifts)**\n• **Total Changeovers:** **0 tagged changeovers**${legacyNote}`;
-        const recentList = co.events.slice(-10).map(e => `• **${e.date} (${e.time}):** ${e.from} → **${e.to}** *[${e.type_label}, ${e.mins} mins]*`).join("\n");
-        return `🔄 **${filterLabel} — Changeover Report (${stats.shift_count} Shifts)**\n• **Total Changeovers:** **${co.total_count} changeover${co.total_count > 1 ? "s" : ""}** *(${co.total_mins} mins total)*\n• **Color Changeovers (Variant Only):** **${co.color_count}** *(${co.color_mins} mins)*\n• **Mechanical Changeovers (Size Only):** **${co.mechanical_count}** *(${co.mechanical_mins} mins)*\n• **Both (Color + Size Changeover):** **${co.both_count}** *(${co.both_mins} mins)*` + (recentList ? `\n\n📋 **Tagged Changeover Log:**\n${recentList}` : "") + legacyNote;
+        if (co.total_count === 0) {
+            return `🔄 **${filterLabel} — Changeover Summary (${stats.shift_count} Shifts)**\n• **Total Changeovers:** **0 tagged changeovers**${legacyNote}`;
+        }
+        const recentList = co.events.slice(-10).map(e =>
+            `• **${e.date} (${e.time}):** ${e.from} → **${e.to}** *[${e.type_label}, ${e.duration_str}]*`
+        ).join("\n");
+
+        return `🔄 **${filterLabel} — Changeover Report (${stats.shift_count} Shifts)**\n` +
+            `• **Total Changeovers:** **${co.total_count} changeover${co.total_count > 1 ? "s" : ""}** *(${co.total_time_str} total)*\n` +
+            `• **Color Changeovers (Variant Only):** **${co.color_count}** *(${co.color_time_str})*\n` +
+            `• **Mechanical Changeovers (Size Only):** **${co.mechanical_count}** *(${co.mechanical_time_str})*\n` +
+            `• **Both (Color + Size Changeover):** **${co.both_count}** *(${co.both_time_str})*` +
+            (recentList ? `\n\n📋 **Tagged Changeover Log:**\n${recentList}` : "") +
+            legacyNote;
     }
 
+    // 2. Shift Records & True Single-Hour Peak
     if (asksBestOrWorst && stats.records.best_cases) {
         const r = stats.records;
-        return `🏆 **Shift Records — ${filterLabel} (${stats.shift_count} Shifts)**\n• **Highest Production:** **${r.best_cases.date}** — **${r.best_cases.cases.toLocaleString()} cases** (${r.best_cases.tons.toFixed(2)} tons)\n• **Lowest Production:** **${r.lowest_cases.date}** — **${r.lowest_cases.cases.toLocaleString()} cases** (${r.lowest_cases.tons.toFixed(2)} tons)\n` + (r.best_oee ? `• **Best OEE:** **${r.best_oee.date}** — **${r.best_oee.oee.toFixed(2)}%**\n` : "") + (r.worst_downtime && r.worst_downtime.downtime_mins > 0 ? `• **Highest Downtime:** **${r.worst_downtime.date}** — **${r.worst_downtime.downtime_mins} mins** (${r.worst_downtime.breakdown_count} stops)\n` : "") + (stats.peak_hour ? `• **Peak Production Hour:** **${stats.peak_hour.hour}** (${stats.peak_hour.cases.toLocaleString()} cases)` : "");
+        return `🏆 **Shift Records — ${filterLabel} (${stats.shift_count} Shifts)**\n` +
+            `• **Highest Production Shift:** **${r.best_cases.date}** — **${r.best_cases.cases.toLocaleString()} cases** (${r.best_cases.tons.toFixed(2)} tons)\n` +
+            `• **Lowest Production Shift:** **${r.lowest_cases.date}** — **${r.lowest_cases.cases.toLocaleString()} cases** (${r.lowest_cases.tons.toFixed(2)} tons)\n` +
+            (r.best_oee ? `• **Best OEE:** **${r.best_oee.date}** — **${r.best_oee.oee.toFixed(2)}%**\n` : "") +
+            (r.worst_downtime && r.worst_downtime.downtime_mins > 0 ? `• **Highest Downtime:** **${r.worst_downtime.date}** — **${r.worst_downtime.downtime_str}** (${r.worst_downtime.breakdown_count} stops)\n` : "") +
+            (stats.peak_hour ? `• **Peak Single-Hour Output:** **${stats.peak_hour.cases.toLocaleString()} cases** *(on ${stats.peak_hour.date}, ${stats.peak_hour.hour})*` : "") +
+            legacyNote;
     }
 
+    // 3. Brand Split
     if (asksBrandSplit && Object.keys(stats.brands).length > 0) {
         const brandBullets = Object.entries(stats.brands).sort((a, b) => b[1].cases - a[1].cases).map(([bName, d]) => `• **${bName}:** **${d.cases.toLocaleString()} cases** (**${d.tons.toFixed(2)} tons** — ${d.share_pct}%)`).join("\n");
         return `📊 **Brand Split — ${filterLabel} (${stats.shift_count} Shifts)**\n${brandBullets}\n• **Combined Total:** ${stats.total_cases.toLocaleString()} cases (${stats.total_tons.toFixed(2)} tons)${unreportedNote}`;
     }
 
+    // 4. Downtime Report
     if (asksDowntime) {
-        if (stats.legacy_count === stats.shift_count) return `⏱️ **${filterLabel} — Downtime Report**\n• **Recorded Breakdown Time:** 0 mins\n• **Note:** All **${stats.shift_count} shifts** in this period are *legacy manual entries*, which do not store automated breakdown logs.`;
-        return `⏱️ **${filterLabel} — Stoppage & Downtime Summary**\n• **True Breakdown Time:** **${stats.total_downtime_mins} mins** (${(stats.total_downtime_mins / 60).toFixed(1)} hrs across ${stats.total_breakdowns} stops)\n• **Tagged Changeovers:** **${stats.changeovers.total_count} changeovers** (${stats.changeovers.total_mins} mins)\n• **Break Time:** **${stats.total_break_mins} mins**${legacyNote}`;
+        if (stats.legacy_count === stats.shift_count) {
+            return `⏱️ **${filterLabel} — Downtime Report**\n• **Recorded Breakdown Time:** 0 minutes\n• **Note:** All **${stats.shift_count} shifts** in this period were manually entered before automatic IoT monitoring began on **${firstAutoDateStr}**, so automated breakdown logs are not available.`;
+        }
+        return `⏱️ **${filterLabel} — Stoppage & Downtime Summary**\n` +
+            `• **True Breakdown Time:** **${stats.total_downtime_str}** *(across ${stats.total_breakdowns} stops)*\n` +
+            `• **Tagged Changeovers:** **${stats.changeovers.total_count} changeovers** *(${stats.changeovers.total_time_str})*\n` +
+            `• **Break Time:** **${stats.total_break_str}**${legacyNote}`;
     }
 
     if (asksTonsOnly) return `⚖️ **${filterLabel} — Total Tonnage**\n• **Total Weight:** **${stats.total_tons.toFixed(2)} tons**\n• **Total Cases:** ${stats.total_cases.toLocaleString()} cases *(across ${stats.shift_count} shifts)*${unreportedNote}`;
     if (asksCasesOnly) return `📦 **${filterLabel} — Total Cases**\n• **Total Output:** **${stats.total_cases.toLocaleString()} cases**\n• **Total Weight:** ${stats.total_tons.toFixed(2)} tons *(across ${stats.shift_count} shifts)*${unreportedNote}`;
     if (asksOeeOnly) return stats.avg_oee !== null ? `📈 **${filterLabel} — Efficiency (OEE)**\n• **Average OEE:** **${stats.avg_oee}%**\n• **Output:** ${stats.total_cases.toLocaleString()} cases (${stats.total_tons.toFixed(2)} tons across ${stats.shift_count} shifts)` : `ℹ️ No OEE percentage was calculated for **${filterLabel}**.`;
 
+    // 5. Generic Shift / Period Summary
     const variantBullets = Object.entries(stats.variants).sort((a, b) => b[1].cases - a[1].cases).map(([v, d]) => `• **${v}:** ${d.cases.toLocaleString()} cases *(${d.tons.toFixed(2)} t)*`).join("\n");
 
-    return `📊 **${filterLabel} — Production Summary**\n• **Total Output:** **${stats.total_cases.toLocaleString()} cases** (**${stats.total_tons.toFixed(2)} tons**)\n• **Shifts Logged:** ${stats.shift_count} shift${stats.shift_count > 1 ? "s" : ""}${stats.avg_oee ? ` | **Avg OEE:** **${stats.avg_oee}%**` : ""}\n• **True Downtime:** ${stats.total_downtime_mins} mins | **Changeovers:** ${stats.changeovers.total_count} (${stats.changeovers.total_mins} mins)${unreportedNote}${variantBullets ? `\n\n📦 **Breakdown by Variant:**\n${variantBullets}` : ""}${legacyNote}`;
+    return `📊 **${filterLabel} — Production Summary**\n` +
+        `• **Total Output:** **${stats.total_cases.toLocaleString()} cases** (**${stats.total_tons.toFixed(2)} tons**)\n` +
+        `• **Shifts Logged:** ${stats.shift_count} shift${stats.shift_count > 1 ? "s" : ""}${stats.avg_oee ? ` | **Avg OEE:** **${stats.avg_oee}%**` : ""}\n` +
+        `• **True Downtime:** ${stats.total_downtime_str} | **Changeovers:** ${stats.changeovers.total_count} (${stats.changeovers.total_time_str})` +
+        `${unreportedNote}${variantBullets ? `\n\n📦 **Breakdown by Variant:**\n${variantBullets}` : ""}${legacyNote}`;
 }
 
 exports.handler = async function(event, context) {
@@ -363,11 +462,12 @@ exports.handler = async function(event, context) {
         let adjTotal = typeof adjData === "number" ? adjData : (adjData && typeof adjData === "object" ? Number(adjData.total) || 0 : 0);
         const liveCasesNow = Math.max(0, Number((liveData && liveData.total_cases) || 0) + adjTotal);
         const liveStatusStr = liveData && liveData.line_status ? liveData.line_status : "Shift Inactive";
+        const liveBreakdownStr = formatDuration(Math.round(Number((liveData && liveData.breakdown_seconds) || 0) / 60));
 
         if (/^(hi|hello|hey|salam|good morning|good evening|help)[\s!?.]*$/i.test(lowerMsg)) {
             return {
                 statusCode: 200,
-                body: JSON.stringify({ reply: `👋 **Hello! I'm your Factory AI Analyst.**\n\n🟢 **Live Line Status:** **${liveStatusStr}** (${liveCasesNow.toLocaleString()} cases)\n\n💡 **Try asking me:**\n• *"September and October tons separately"*\n• *"Tell me latest production"*\n• *"How many changeovers we did in September?"*\n• *"Tell me production split in LUX and Lifebuoy"*` })
+                body: JSON.stringify({ reply: `👋 **Hello! I'm your Factory AI Analyst.**\n\n🟢 **Live Line Status:** **${liveStatusStr}** (${liveCasesNow.toLocaleString()} cases)\n\n💡 **Try asking me:**\n• *"What did we produce yesterday?"*\n• *"September and October tons separately"*\n• *"How many changeovers we did this year?"*\n• *"Tell me production split in LUX and Lifebuoy"*` })
             };
         }
 
@@ -406,18 +506,34 @@ exports.handler = async function(event, context) {
                 const durMins = Math.round(Number(c.duration || 0) / 60);
                 const prevInShift = dedupedChangeovers[dedupedChangeovers.length - 1];
 
+                // Deduplicate identical consecutive changeovers in same shift
                 if (prevInShift && (prevInShift.transitionKey === transitionKey || prevInShift.to.toLowerCase() === toVar.toLowerCase())) {
-                    if (prevInShift.rawStart !== c.start || prevInShift.mins !== durMins) prevInShift.mins += durMins;
+                    if (prevInShift.rawStart !== c.start || prevInShift.mins !== durMins) {
+                        prevInShift.mins += durMins;
+                        prevInShift.duration_str = formatDuration(prevInShift.mins);
+                    }
                     cursorVariant = toVar;
                     return;
                 }
+                // Deduplicate boundary changeover already tagged at end of previous shift
                 if (dedupedChangeovers.length === 0 && lastGlobalTransitionKey === transitionKey) {
                     cursorVariant = toVar;
                     return;
                 }
 
                 const coType = classifyChangeoverType(fromVar, toVar);
-                dedupedChangeovers.push({ date: formattedDate, rawStart: c.start, time: formatQatarTime(c.start), from: fromVar || "Previous Variant", to: toVar, type: coType, type_label: coType === "both" ? "Color + Size" : (coType === "mechanical" ? "Mechanical (Size)" : "Color (Variant)"), mins: durMins, transitionKey });
+                dedupedChangeovers.push({
+                    date: formattedDate,
+                    rawStart: c.start,
+                    time: formatQatarTime(c.start),
+                    from: fromVar || "Previous Variant",
+                    to: toVar,
+                    type: coType,
+                    type_label: coType === "both" ? "Color + Size" : (coType === "mechanical" ? "Mechanical (Size)" : "Color (Variant)"),
+                    mins: durMins,
+                    duration_str: formatDuration(durMins),
+                    transitionKey
+                });
                 cursorVariant = toVar;
                 lastGlobalTransitionKey = transitionKey;
             });
@@ -427,30 +543,42 @@ exports.handler = async function(event, context) {
             if (dedupedChangeovers.length === 0) lastGlobalTransitionKey = null;
 
             const dedupedChangeoverMins = dedupedChangeovers.reduce((sum, item) => sum + item.mins, 0);
+            const dtMins = Math.round(trueDowntimeSec / 60);
+            const coMins = dedupedChangeovers.length > 0 ? dedupedChangeoverMins : Math.round(Number((r && r.changeover_time_seconds) || 0) / 60);
+            const brkMins = Math.round(breakSec / 60);
 
             return {
                 date: formattedDate, day: d ? d.day : null, month: d ? d.month : null, year: d ? d.year : null, dayValue: d ? d.dayValue : 0,
                 shift_start_str: formatQatarTime(s.shift_start), shift_end_str: formatQatarTime(s.shift_end),
                 cases, tons, oee, has_report: !!r, source: s.source === "legacy_manual" ? "legacy_manual" : "automated",
-                downtime_mins: Math.round(trueDowntimeSec / 60),
-                changeover_mins: dedupedChangeovers.length > 0 ? dedupedChangeoverMins : Math.round(Number((r && r.changeover_time_seconds) || 0) / 60),
-                break_mins: Math.round(breakSec / 60), breakdown_count: Number((r && r.true_breakdown_count) ?? s.breakdown_count ?? 0),
+                downtime_mins: dtMins, downtime_str: formatDuration(dtMins),
+                changeover_mins: coMins, changeover_str: formatDuration(coMins),
+                break_mins: brkMins, break_str: formatDuration(brkMins),
+                breakdown_count: Number((r && r.true_breakdown_count) ?? s.breakdown_count ?? 0),
                 variant_totals: variantTotals, variant_tons: variantTons, hourly_production: hourly,
-                changeovers_detail: dedupedChangeovers, breakdowns_detail: breakdowns.map(b => ({ time: formatQatarTime(b.start), mins: Math.round((b.duration || 0) / 60) }))
+                changeovers_detail: dedupedChangeovers,
+                breakdowns_detail: breakdowns.map(b => {
+                    const bMins = Math.round((b.duration || 0) / 60);
+                    return { time: formatQatarTime(b.start), mins: bMins, duration_str: formatDuration(bMins) };
+                })
             };
         });
 
+        // Dynamically detect when automated IoT shift tracking started
+        const firstAutoShift = allShifts.find(s => s.source === "automated");
+        const firstAutoDateStr = firstAutoShift ? firstAutoShift.date : "12-09-2026";
+
+        // Current Qatar Date & Time Anchor (GMT+3)
         const nowQatar = new Date(Date.now() + (3 * 3600 * 1000));
-        const currentYear = nowQatar.getUTCFullYear();
-        const currentMonth = nowQatar.getUTCMonth();
+        const currentQatarDateStr = `${DAY_NAMES[nowQatar.getUTCDay()]}, ${nowQatar.getUTCDate()} ${MONTH_NAMES[nowQatar.getUTCMonth()]} ${nowQatar.getUTCFullYear()}`;
 
-        let activeFilter = extractTimeFilter(lowerMsg, allShifts, currentYear, currentMonth);
+        let activeFilter = extractTimeFilter(lowerMsg, allShifts, nowQatar);
 
-        // Inherit previous date range if current message has no explicit date filter
+        // Inherit previous date filter on conversational follow-ups
         if (activeFilter.type === "none" && chatHistory.length > 0) {
             for (let i = chatHistory.length - 1; i >= 0; i--) {
                 if (chatHistory[i].role === "user") {
-                    const prevFilter = extractTimeFilter(chatHistory[i].content, allShifts, currentYear, currentMonth);
+                    const prevFilter = extractTimeFilter(chatHistory[i].content, allShifts, nowQatar);
                     if (prevFilter.type !== "none") {
                         activeFilter = prevFilter;
                         break;
@@ -479,22 +607,27 @@ exports.handler = async function(event, context) {
                 filteredShifts = filteredShifts.filter(s => matchedMonths.includes(s.month) && (!targetYear || s.year === targetYear));
                 if (activeFilter.requestedDay !== null) {
                     filteredShifts = filteredShifts.filter(s => s.day === activeFilter.requestedDay);
-                    filterLabel = `${activeFilter.requestedDay} ${MONTH_NAMES[matchedMonths[0]]}${targetYear ? " " + targetYear : ""}`;
+                    filterLabel = activeFilter.customLabel || `${activeFilter.requestedDay} ${MONTH_NAMES[matchedMonths[0]]}${targetYear ? " " + targetYear : ""}`;
                 } else {
                     filterLabel = `${matchedMonths.map(m => MONTH_NAMES[m]).join(", ")}${targetYear ? " " + targetYear : ""}`;
                 }
             }
         } else if (activeFilter.type === "slice") {
             filteredShifts = allShifts.slice(-activeFilter.count);
-            filterLabel = activeFilter.label;
+            if (activeFilter.count === 1 && filteredShifts.length === 1) {
+                filterLabel = `Latest Shift (${filteredShifts[0].date})`;
+            } else {
+                filterLabel = activeFilter.label;
+            }
         }
 
         function aggregateShifts(shiftsArray) {
             let totalCases = 0, totalTons = 0, totalDowntimeMins = 0, totalBreakMins = 0, totalBreakdowns = 0;
             let oeeSum = 0, oeeCount = 0, legacyCount = 0, unreportedCount = 0, unreportedCases = 0;
-            const byVariant = {}, byBrand = {}, byMonth = {}, hourlyTotals = {};
+            const byVariant = {}, byBrand = {}, byMonth = {}, hourlySum = {}, hourlyCounts = {};
             const changeoverStats = { total_count: 0, total_mins: 0, color_count: 0, color_mins: 0, mechanical_count: 0, mechanical_mins: 0, both_count: 0, both_mins: 0, events: [] };
             let bestCasesShift = null, lowestCasesShift = null, bestOeeShift = null, worstOeeShift = null, worstDowntimeShift = null;
+            let peakSingleHour = null;
 
             shiftsArray.forEach(s => {
                 totalCases += s.cases; totalTons += s.tons; totalDowntimeMins += s.downtime_mins; totalBreakMins += s.break_mins; totalBreakdowns += s.breakdown_count;
@@ -517,16 +650,29 @@ exports.handler = async function(event, context) {
 
                 if (!bestCasesShift || s.cases > bestCasesShift.cases) bestCasesShift = { date: s.date, cases: s.cases, tons: Number(s.tons.toFixed(2)), oee: s.oee };
                 if (s.cases > 0 && (!lowestCasesShift || s.cases < lowestCasesShift.cases)) lowestCasesShift = { date: s.date, cases: s.cases, tons: Number(s.tons.toFixed(2)), oee: s.oee };
-                if (!worstDowntimeShift || s.downtime_mins > worstDowntimeShift.downtime_mins) worstDowntimeShift = { date: s.date, downtime_mins: s.downtime_mins, breakdown_count: s.breakdown_count, cases: s.cases };
+                if (!worstDowntimeShift || s.downtime_mins > worstDowntimeShift.downtime_mins) {
+                    worstDowntimeShift = { date: s.date, downtime_mins: s.downtime_mins, downtime_str: s.downtime_str, breakdown_count: s.breakdown_count, cases: s.cases };
+                }
 
-                Object.entries(s.hourly_production || {}).forEach(([hLabel, hCases]) => { hourlyTotals[hLabel] = (hourlyTotals[hLabel] || 0) + Number(hCases || 0); });
+                // Track true single-shift peak hour instead of summing across multiple days
+                Object.entries(s.hourly_production || {}).forEach(([hLabel, hCases]) => {
+                    const c = Number(hCases || 0);
+                    if (c > 0) {
+                        hourlySum[hLabel] = (hourlySum[hLabel] || 0) + c;
+                        hourlyCounts[hLabel] = (hourlyCounts[hLabel] || 0) + 1;
+                        if (!peakSingleHour || c > peakSingleHour.cases) {
+                            peakSingleHour = { hour: hLabel, cases: c, date: s.date };
+                        }
+                    }
+                });
 
                 const mKey = (s.year && s.month !== null) ? `${MONTH_NAMES[s.month]} ${s.year}` : "Unknown";
                 if (!byMonth[mKey]) {
-                    byMonth[mKey] = { shifts: 0, cases: 0, tons: 0, legacy_shifts: 0, lux_cases: 0, lux_tons: 0, lifebuoy_cases: 0, lifebuoy_tons: 0 };
+                    byMonth[mKey] = { shifts: 0, automated_shifts: 0, legacy_shifts: 0, cases: 0, tons: 0, lux_cases: 0, lux_tons: 0, lifebuoy_cases: 0, lifebuoy_tons: 0 };
                 }
                 byMonth[mKey].shifts += 1; byMonth[mKey].cases += s.cases; byMonth[mKey].tons = Number((byMonth[mKey].tons + s.tons).toFixed(2));
                 if (s.source === "legacy_manual") byMonth[mKey].legacy_shifts += 1;
+                else byMonth[mKey].automated_shifts += 1;
 
                 Object.entries(s.variant_totals || {}).forEach(([vName, vCases]) => {
                     const c = Number(vCases || 0), t = Number((s.variant_tons && s.variant_tons[vName]) || 0);
@@ -542,17 +688,25 @@ exports.handler = async function(event, context) {
             });
 
             Object.keys(byBrand).forEach(b => { byBrand[b].share_pct = totalCases > 0 ? Number(((byBrand[b].cases / totalCases) * 100).toFixed(1)) : 0; });
-            let peakHour = null;
-            Object.entries(hourlyTotals).forEach(([hour, cases]) => { if (!peakHour || cases > peakHour.cases) peakHour = { hour, cases }; });
+
+            const hourlyAverages = {};
+            Object.keys(hourlySum).forEach(hLabel => {
+                hourlyAverages[hLabel] = shiftsArray.length === 1
+                    ? hourlySum[hLabel]
+                    : Math.round(hourlySum[hLabel] / (hourlyCounts[hLabel] || 1));
+            });
+
+            changeoverStats.total_time_str = formatDuration(changeoverStats.total_mins);
+            changeoverStats.color_time_str = formatDuration(changeoverStats.color_mins);
+            changeoverStats.mechanical_time_str = formatDuration(changeoverStats.mechanical_mins);
+            changeoverStats.both_time_str = formatDuration(changeoverStats.both_mins);
 
             const matchedMonthBreakdown = {};
             if (matchedMonths && matchedMonths.length > 0) {
                 matchedMonths.forEach(mIdx => {
                     const mName = MONTH_NAMES[mIdx];
                     Object.keys(byMonth).forEach(k => {
-                        if (k.startsWith(mName)) {
-                            matchedMonthBreakdown[k] = byMonth[k];
-                        }
+                        if (k.startsWith(mName)) matchedMonthBreakdown[k] = byMonth[k];
                     });
                 });
             }
@@ -567,14 +721,16 @@ exports.handler = async function(event, context) {
                 total_cases: totalCases, 
                 total_tons: Number(totalTons.toFixed(2)), 
                 avg_oee: oeeCount > 0 ? Number((oeeSum / oeeCount).toFixed(2)) : null, 
-                total_downtime_mins: totalDowntimeMins, 
-                total_break_mins: totalBreakMins, 
+                total_downtime_mins: totalDowntimeMins,
+                total_downtime_str: formatDuration(totalDowntimeMins),
+                total_break_mins: totalBreakMins,
+                total_break_str: formatDuration(totalBreakMins),
                 total_breakdowns: totalBreakdowns, 
                 changeovers: changeoverStats, 
                 brands: byBrand, 
                 variants: byVariant, 
-                hourly_totals: hourlyTotals, 
-                peak_hour: peakHour, 
+                hourly_averages: hourlyAverages, 
+                peak_hour: peakSingleHour, 
                 matched_month_breakdown: matchedMonthBreakdown,
                 records: { best_cases: bestCasesShift, lowest_cases: lowestCasesShift, best_oee: bestOeeShift, worst_oee: worstOeeShift, worst_downtime: worstDowntimeShift }, 
                 monthly_rollup: byMonth 
@@ -592,7 +748,7 @@ exports.handler = async function(event, context) {
             return {
                 statusCode: 200,
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reply: buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear) })
+                body: JSON.stringify({ reply: buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear, firstAutoDateStr) })
             };
         }
 
@@ -605,42 +761,71 @@ exports.handler = async function(event, context) {
             };
         }
 
+        // Clean shift timeline context so the AI can see dates and runs without guessing math
+        const isSmallSlice = filteredShifts.length <= 5;
+        const compactRows = filteredShifts.slice(-20).map(s => {
+            const row = {
+                date: s.date,
+                cases: s.cases,
+                tons: Number(s.tons.toFixed(2)),
+                oee: s.oee !== null ? Number(s.oee.toFixed(1)) : null,
+                downtime: s.downtime_str,
+                changeovers: s.changeovers_detail.length,
+                changeover_time: s.changeover_str,
+                source: s.source,
+                variants: s.variant_totals
+            };
+            if (isSmallSlice) {
+                row.hourly_production = s.hourly_production;
+                row.changeovers_log = s.changeovers_detail;
+                row.breakdowns_log = s.breakdowns_detail;
+            }
+            return row;
+        });
+
         const userAsksBrand = /\b(lux|lifebuoy|brand)\b/i.test(lowerMsg);
         const brandSectionForPrompt = userAsksBrand ? `- PRE-CALCULATED BRAND SPLIT (LUX vs Lifebuoy): ${JSON.stringify(stats.brands)}\n` : "";
-        const multiMonthSectionForPrompt = isMultiMonth ? `- PRE-CALCULATED MONTH-BY-MONTH BREAKDOWN (Use this when user asks for months separately or vs): ${JSON.stringify(stats.matched_month_breakdown)}\n` : "";
+        const multiMonthSectionForPrompt = isMultiMonth ? `- PRE-CALCULATED MONTH-BY-MONTH BREAKDOWN: ${JSON.stringify(stats.matched_month_breakdown)}\n` : "";
+        const legacyPromptContext = stats.legacy_count > 0
+            ? `- HISTORICAL DATA LIMITATION NOTE: Automatic IoT shift monitoring on this line began on ${firstAutoDateStr} (${stats.automated_count} automated shifts in this period). The ${stats.legacy_count} earlier shifts in this period are "legacy_manual" entries, which only recorded total cases, tonnage, and variants—they DO NOT contain automated changeover logs, breakdown timestamps, OEE, or hourly sensor buckets.`
+            : `- DATA COVERAGE: All ${stats.shift_count} shifts in this period are fully automated IoT records.`;
 
         const systemPrompt = `You are the Factory AI Analyst for a Unilever production line.
 
-LIVE ACTIVE SHIFT RIGHT NOW:
-Status: ${liveStatusStr}, Live Cases: ${liveCasesNow.toLocaleString()}, Breakdown: ${Math.round(Number((liveData && liveData.breakdown_seconds) || 0) / 60)} mins.
+CURRENT QATAR DATE (GMT+3): ${currentQatarDateStr}
+LIVE ACTIVE SHIFT RIGHT NOW: Status: ${liveStatusStr}, Live Cases: ${liveCasesNow.toLocaleString()}, Active Breakdown: ${liveBreakdownStr}.
 
 VERIFIED JS-CALCULATED TOTALS FOR "${filterLabel}" (${stats.shift_count} Shifts):
-- Matched Shifts: ${stats.shift_count} (${stats.unreported_count} awaiting OEE/tonnage report)
+- Matched Shifts: ${stats.shift_count} (${stats.automated_count} automated IoT shifts, ${stats.legacy_count} legacy manual shifts)
+${legacyPromptContext}
 - Total Cases Produced: ${stats.total_cases.toLocaleString()} cases
 - Total Tonnage: ${stats.total_tons.toFixed(2)} tons
 - Average OEE: ${stats.avg_oee !== null ? stats.avg_oee + "%" : "N/A"}
-- Total True Downtime: ${stats.total_downtime_mins} mins (${(stats.total_downtime_mins / 60).toFixed(1)} hrs) across ${stats.total_breakdowns} breakdowns
+- Total True Downtime: ${stats.total_downtime_str} (across ${stats.total_breakdowns} breakdowns)
+- Total Break Time: ${stats.total_break_str}
 ${multiMonthSectionForPrompt}- VERIFIED DEDUPLICATED CHANGEOVERS FOR "${filterLabel}":
-  * Total Changeovers Count: ${stats.changeovers.total_count} changeovers (${stats.changeovers.total_mins} mins total)
-  * Color Changeovers (Variant changed, size same): ${stats.changeovers.color_count} (${stats.changeovers.color_mins} mins)
-  * Mechanical Changeovers (Size/GM changed, variant same): ${stats.changeovers.mechanical_count} (${stats.changeovers.mechanical_mins} mins)
-  * Both (Color + Size changed together): ${stats.changeovers.both_count} (${stats.changeovers.both_mins} mins)
-  * Tagged Changeover Events List (Chronological, Oldest to Newest): ${JSON.stringify(stats.changeovers.events.slice(-25))}
-- Peak Production Hour Bucket: ${stats.peak_hour ? `${stats.peak_hour.hour} (${stats.peak_hour.cases.toLocaleString()} cases)` : "N/A"}
+  * Total Changeovers Count: ${stats.changeovers.total_count} changeovers (Total time: ${stats.changeovers.total_time_str})
+  * Color Changeovers (Variant changed, size same): ${stats.changeovers.color_count} (${stats.changeovers.color_time_str})
+  * Mechanical Changeovers (Size/GM changed, variant same): ${stats.changeovers.mechanical_count} (${stats.changeovers.mechanical_time_str})
+  * Both (Color + Size changed together): ${stats.changeovers.both_count} (${stats.changeovers.both_time_str})
+  * Tagged Changeover Events List (Oldest to Newest): ${JSON.stringify(stats.changeovers.events.slice(-25))}
+- Peak Single-Hour Production Record in Period: ${stats.peak_hour ? `${stats.peak_hour.cases.toLocaleString()} cases (on ${stats.peak_hour.date} during hour${stats.peak_hour.hour})` : "N/A"}
 - ALL-SHIFT RECORDS (BEST / WORST IN PERIOD): ${JSON.stringify(stats.records)}
 ${brandSectionForPrompt}- Production by Individual Variant: ${JSON.stringify(stats.variants)}
 
 ALL-TIME MONTHLY ROLLUP:
 ${JSON.stringify(globalMonthly)}
 
-STRICT RULES (CRITICAL):
-1. ZERO MATH RULE: You are strictly forbidden from guessing or manually adding numbers. ONLY use the VERIFIED JS-CALCULATED TOTALS above.
-2. MONTH COMPARISON RULE: If the user asks for months "separately", "each", "vs", or "compare", ALWAYS list each individual month from PRE-CALCULATED MONTH-BY-MONTH BREAKDOWN above. Never claim separate figures aren't available.
-3. CHANGEOVER DETAILS RULE: If the user asks for "last mechanical changeover", "last color changeover", or changeover details, look at the "Tagged Changeover Events List" above and report the latest matching event's Date, Time, From -> To variants, Type, and Duration (mins).
-4. CLARIFICATION RULE: DO NOT ask for clarification if the user already named the months, brands, or changeover type. Only ask a brief 1-sentence clarifying question if the question is genuinely ambiguous.
-5. NEVER show the LUX vs. Lifebuoy brand split in generic shift answers unless they explicitly ask for "brand", "LUX", or "Lifebuoy".
-6. Format your response like a clean executive card (use • bullet points and bolding). Do not use Markdown tables or ### headers.
-7. Answer ONLY what the user asked concisely.`;
+RECENT SHIFT LOGS IN "${filterLabel}":
+${JSON.stringify(compactRows)}
+
+RESPONSE GUIDELINES:
+1. USE VERIFIED TOTALS: Always use the pre-calculated totals above for overall figures. Never manually sum rows yourself.
+2. TIME FORMATTING RULE: Whenever mentioning any duration (downtime, changeovers, breaks) of 60 minutes or more, ALWAYS format it in hours and minutes (e.g., "1 hour 20 minutes" instead of "80 minutes"), matching the pre-formatted strings above.
+3. LEGACY vs AUTOMATED DISCLOSURE: Whenever the user asks about changeovers, breakdowns/downtime, OEE, or hourly peaks for a period where legacy_manual shifts > 0 (such as the whole year or all-time), clearly mention that automatic shift monitoring started on ${firstAutoDateStr} and that the ${stats.legacy_count} earlier manual shifts do not contain changeover or stoppage records.
+4. PEAK HOUR RULE: Peak production hour is a single-hour record from a single shift (${stats.peak_hour ? `${stats.peak_hour.cases} cases on ${stats.peak_hour.date} at${stats.peak_hour.hour}` : "N/A"}), never a sum across multiple days.
+5. BRAND SPLIT RULE: Only show the LUX vs. Lifebuoy brand split if the user explicitly asks about "brand", "LUX", or "Lifebuoy".
+6. FORMATTING: Present answers as a clean executive card using "• " bullet points and bold labels. Do not use Markdown |---| tables or ### headers.`;
 
         let replyText = "";
         const groqKey = (process.env.GROQ_API_KEY || "").trim();
@@ -666,7 +851,7 @@ STRICT RULES (CRITICAL):
             }
         }
 
-        if (!replyText) replyText = buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear);
+        if (!replyText) replyText = buildFocusedJSReply(lowerMsg, filterLabel, stats, allShifts, matchedMonths, targetYear, firstAutoDateStr);
 
         return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reply: replyText }) };
     } catch (error) {
